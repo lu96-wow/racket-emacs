@@ -20,6 +20,8 @@
  ;; paren-depth faces (protocol)
  font-lock-paren-face-1 font-lock-paren-face-2 font-lock-paren-face-3
  font-lock-paren-face-4 font-lock-paren-face-5 font-lock-paren-face-6
+ font-lock-paren-face-7 font-lock-paren-face-8 font-lock-paren-face-9
+ font-lock-paren-face-10 font-lock-paren-face-11 font-lock-paren-face-12
 
  ;; buffer-var config
  font-lock-defaults set-font-lock-defaults!
@@ -49,6 +51,12 @@
 (define font-lock-paren-face-4 'font-lock-paren-face-4)
 (define font-lock-paren-face-5 'font-lock-paren-face-5)
 (define font-lock-paren-face-6 'font-lock-paren-face-6)
+(define font-lock-paren-face-7 'font-lock-paren-face-7)
+(define font-lock-paren-face-8 'font-lock-paren-face-8)
+(define font-lock-paren-face-9 'font-lock-paren-face-9)
+(define font-lock-paren-face-10 'font-lock-paren-face-10)
+(define font-lock-paren-face-11 'font-lock-paren-face-11)
+(define font-lock-paren-face-12 'font-lock-paren-face-12)
 
 (define paren-depth-faces
   (vector font-lock-paren-face-1
@@ -56,7 +64,13 @@
           font-lock-paren-face-3
           font-lock-paren-face-4
           font-lock-paren-face-5
-          font-lock-paren-face-6))
+          font-lock-paren-face-6
+          font-lock-paren-face-7
+          font-lock-paren-face-8
+          font-lock-paren-face-9
+          font-lock-paren-face-10
+          font-lock-paren-face-11
+          font-lock-paren-face-12))
 
 ;; ============================================================
 ;; Per-buffer config
