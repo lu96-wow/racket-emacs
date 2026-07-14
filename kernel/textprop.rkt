@@ -20,7 +20,8 @@
  put-paren-depth
  get-paren-depth
  clear-paren-depth!
- paren-depth-map)
+ paren-depth-map
+ paren-depth-adjust!)
 
 ;; ============================================================
 ;; Per-buffer storage
@@ -120,3 +121,12 @@
   (when (< start end)
     (define im (hash-ref paren-depth-table buf (λ () #f)))
     (when im (interval-map-remove! im start end))))
+
+;; ── after-change hook helper: keep paren-depth map in sync ──
+(define (paren-depth-adjust! b start lendel lenins)
+  (define pd (paren-depth-map b))
+  (cond [(positive? lenins)
+         (interval-map-expand! pd start (+ start lenins))]
+        [(positive? lendel)
+         (interval-map-contract! pd start (+ start lendel))]
+        [else (void)]))

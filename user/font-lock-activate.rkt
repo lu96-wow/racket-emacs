@@ -4,21 +4,9 @@
 
 (require "../kernel/buffer.rkt"
          "../kernel/textprop.rkt"
-         "../kernel/font-lock.rkt"
-         data/interval-map)
+         "../kernel/font-lock.rkt")
 
 (provide activate-highlight!)
-
-;; ── paren-depth interval-map adjustment ──
-;; Runs BEFORE fontify-after-change! on every buffer edit so that
-;; paren-depth data stays in sync with the text positions.
-(define (paren-depth-adjust! b start lendel lenins)
-  (define pd (paren-depth-map b))
-  (cond [(positive? lenins)
-         (interval-map-expand! pd start (+ start lenins))]
-        [(positive? lendel)
-         (interval-map-contract! pd start (+ start lendel))]
-        [else (void)]))
 
 (define (activate-highlight! buf)
   (define kw (buffer-highlight-keywords buf))
@@ -27,8 +15,7 @@
     (set-font-lock-defaults! kw (buffer-highlight-syntax? buf) #f buf)
     (fontify-buffer! buf)
     (define hm (buffer-hooks buf))
-    ;; paren-depth adjustment MUST run before font-lock rebuilds.
-    ;; Prepend so it runs first.
+    ;; paren-depth interval-map adjustment MUST run before font-lock rebuilds.
     (unless (memq paren-depth-adjust! (hook-manager-after-fns hm))
       (set-hook-manager-after-fns! hm
         (cons paren-depth-adjust! (hook-manager-after-fns hm))))

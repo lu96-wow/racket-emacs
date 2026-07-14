@@ -1,1 +1,0 @@
-("9.2" ta6le ("5075ba6ab134dec74e6bfdf860da4831b6b33c4b" . "5302353f0250293389e6da199513544926e5a4e8") #"/home/lu96/work/editer/racket-emacs-rebuild/kernel/key-event.rkt" (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt") (indirect collects #"racket" #"match" #"gen-match.rkt") (indirect collects #"racket" #"match" #"parse.rkt"))
