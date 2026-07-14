@@ -37,8 +37,8 @@
 ;; ============================================================
 
 (define (init-buffer-text-properties! buf)
-  (when (not (buffer-local buf 'textprop-initialized? #f))
-    (set-buffer-local! buf 'textprop-initialized? #t)
+  (when (not (buffer-var buf 'textprop-initialized? #f))
+    (set-buffer-var! buf 'textprop-initialized? #t)
     (buffer-prop-map buf)  ; ensure exists
     ;; Register after-change hook for interval adjustment (MUST run before font-lock)
     (define hm (buffer-hooks buf))

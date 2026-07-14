@@ -18,14 +18,14 @@
  font-lock-constant-face font-lock-function-name-face
  font-lock-type-face font-lock-variable-name-face
 
- ;; buffer-local config
+ ;; buffer-var config
  font-lock-defaults set-font-lock-defaults!
  font-lock-keywords font-lock-syntax? font-lock-case-fold?
 
  ;; engine
- font-lock-fontify-buffer font-lock-fontify-region
- font-lock-unfontify-region
- font-lock-after-change-handler)
+ fontify-buffer! fontify-region!
+ unfontify-region!
+ fontify-after-change!)
 
 ;; ============================================================
 ;; Face names (protocol symbols, no colors here)
@@ -45,9 +45,9 @@
 ;; ============================================================
 
 (define (font-lock-defaults [buf (current-buffer)])
-  (buffer-local buf 'font-lock-defaults '(() #t #f)))
+  (buffer-var buf 'font-lock-defaults '(() #t #f)))
 (define (set-font-lock-defaults! kw [syntax? #t] [case-fold? #f] [buf (current-buffer)])
-  (set-buffer-local! buf 'font-lock-defaults (list kw syntax? case-fold?)))
+  (set-buffer-var! buf 'font-lock-defaults (list kw syntax? case-fold?)))
 (define (font-lock-keywords [buf (current-buffer)]) (first (font-lock-defaults buf)))
 (define (font-lock-syntax? [buf (current-buffer)]) (second (font-lock-defaults buf)))
 (define (font-lock-case-fold? [buf (current-buffer)]) (third (font-lock-defaults buf)))
@@ -98,7 +98,7 @@
 ;; Syntactic pass — data-driven: reads rules from syntax-table
 ;; ============================================================
 
-(define (font-lock-syntactic-pass buf beg end)
+(define (fontify-syntax! buf beg end)
   (define gb (buffer-gap buf))
   (define len (min end (gap-byte-length gb)))
   (define st (buffer-syntax-table buf))
@@ -202,7 +202,7 @@
 ;; Keyword pass — regex match → text property
 ;; ============================================================
 
-(define (font-lock-keyword-pass buf beg end)
+(define (fontify-keywords! buf beg end)
   (define keywords (font-lock-keywords buf))
   (unless (null? keywords)
     (define gb (buffer-gap buf))
@@ -232,21 +232,21 @@
 ;; Public API
 ;; ============================================================
 
-(define (font-lock-unfontify-region buf beg end)
+(define (unfontify-region! buf beg end)
   (when (< beg end)
     (remove-text-properties buf beg end '(face))))
 
-(define (font-lock-fontify-region buf beg end)
+(define (fontify-region! buf beg end)
   (when (< beg end)
-    (font-lock-unfontify-region buf beg end)
+    (unfontify-region! buf beg end)
     (when (font-lock-syntax? buf)
-      (font-lock-syntactic-pass buf beg end))
-    (font-lock-keyword-pass buf beg end)))
+      (fontify-syntax! buf beg end))
+    (fontify-keywords! buf beg end)))
 
-(define (font-lock-fontify-buffer buf)
-  (font-lock-fontify-region buf 0 (buffer-byte-length buf)))
+(define (fontify-buffer! buf)
+  (fontify-region! buf 0 (buffer-byte-length buf)))
 
-(define font-lock-after-change-handler
+(define fontify-after-change!
   (λ (buf start lendel lenins)
     (define changed-end (+ start (max lendel lenins)))
     (define gb (buffer-gap buf))
@@ -269,4 +269,4 @@
         (if (or (>= nl buflen) (zero? remaining))
             (if (< nl buflen) nl buflen)
             (loop (add1 nl) (sub1 remaining)))))
-    (font-lock-fontify-region buf sol eol)))
+    (fontify-region! buf sol eol)))

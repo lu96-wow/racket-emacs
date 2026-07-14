@@ -30,7 +30,7 @@
  default-before-change-functions default-after-change-functions
 
  ;; locals
- buffer-local set-buffer-local! kill-buffer-local!
+ buffer-var set-buffer-var! kill-buffer-var!
  truncate-lines? set-truncate-lines?!
  buffer-syntax-table
  buffer-cleanup!
@@ -115,18 +115,18 @@
 ;; Buffer-local variables
 ;; ============================================================
 
-(define (buffer-local buf sym [default #f])
+(define (buffer-var buf sym [default #f])
   (define tbl (hash-ref local-table buf (λ () (make-hasheq))))
   (hash-ref tbl sym (λ () default)))
-(define (set-buffer-local! buf sym value)
+(define (set-buffer-var! buf sym value)
   (define tbl (hash-ref! local-table buf make-hasheq))
   (hash-set! tbl sym value))
-(define (kill-buffer-local! buf sym)
+(define (kill-buffer-var! buf sym)
   (define tbl (hash-ref local-table buf (λ () (make-hasheq))))
   (hash-remove! tbl sym))
 
-(define (truncate-lines? [buf (current-buffer)]) (buffer-local buf 'truncate-lines #t))
-(define (set-truncate-lines?! v [buf (current-buffer)]) (set-buffer-local! buf 'truncate-lines v))
+(define (truncate-lines? [buf (current-buffer)]) (buffer-var buf 'truncate-lines #t))
+(define (set-truncate-lines?! v [buf (current-buffer)]) (set-buffer-var! buf 'truncate-lines v))
 
 ;; ============================================================
 ;; Change tracking
@@ -287,7 +287,7 @@
 
 (define (buffer-syntax-table buf)
   (or (hash-ref syntax-table* buf (λ () #f))
-      (buffer-local buf 'syntax-table #f)))
+      (buffer-var buf 'syntax-table #f)))
 
 (define keymap-table (make-hasheq))
 (define mode-name-table (make-hasheq))
