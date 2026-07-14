@@ -31,6 +31,10 @@
  undo redo
  yank yank-pop
 
+ ;; ── symbol / thing-at-point ──
+ symbol-at-point
+ lisp-identifier-char?
+
  ;; ── mark / region ──
  exchange-point-and-mark
  mark-whole-buffer kill-region
@@ -184,6 +188,85 @@
                   (loop 0 (sub1 count))
                   (let-values ([(ch2 c2) (gap-char-at gb p2)])
                     (loop (+ p2 c2) (sub1 count))))])])))
+
+;; ============================================================
+;; symbol-at-point — extract the identifier under cursor
+;; ============================================================
+
+;; Characters that are valid inside Racket/Lisp identifiers
+;; but not classified as 'word or 'symbol in the syntax table.
+;; Racket §1.1: identifiers may contain special chars like -!$%^&*+=~/<>?.
+(define lisp-ident-extra-chars
+  (list->set (map (λ (s) (string-ref s 0))
+                  (list "-" "!" "$" "%" "^" "&" "*"
+                        "+" "=" "~" "/" "?" "<" ">" "."))))
+
+(define (lisp-identifier-char? ch st)
+  ;; A character is part of a Lisp identifier if:
+  ;; - it's 'word or 'symbol per syntax-table, OR
+  ;; - it's one of the extra punctuation chars Racket allows in identifiers
+  (or (char-word? ch st)
+      (char-symbol? ch st)
+      (set-member? lisp-ident-extra-chars ch)))
+
+(define (symbol-at-point #:buf [b #f])
+  ;; Return the identifier string at the current point position.
+  ;; Uses syntax-table character classes + Racket extended identifier chars.
+  ;; Handles |...| delimited identifiers.
+  ;; Returns #f when point is not on an identifier character.
+  (define buf (or b (current-buffer)))
+  (define st (buffer-syntax-table buf))
+  (define gb (buffer-gap buf))
+  (define len (gap-byte-length gb))
+  (define pt (buffer-point buf))
+  ;; Bounds check
+  (when (>= pt len) (set! pt (max 0 (sub1 len))))
+  (define-values (ch cl) (gap-char-at gb pt))
+
+  (let/ec return
+    ;; ── Handle |...| delimited identifiers ──
+    (when (char=? ch #\|)
+      (define end-pipe (gap-scan-forward-byte gb (+ pt cl) (curry char=? #\|)))
+      (if (< end-pipe len)
+          (return (buffer-substring buf pt (add1 end-pipe)))
+          (return #f)))
+
+    ;; Check if point is on an identifier char
+    (define sym-pos
+      (cond [(lisp-identifier-char? ch st) pt]
+            [(> pt 0)
+             (define prev (gap-prev-char-pos gb pt))
+             (define-values (pch pcl) (gap-char-at gb prev))
+             (if (lisp-identifier-char? pch st) prev #f)]
+            [else #f]))
+    (unless sym-pos (return #f))
+
+    ;; ── Scan backward to find start ──
+    (define start
+      (let loop ([p sym-pos])
+        (if (<= p 0)
+            0
+            (let ([prev (gap-prev-char-pos gb p)])
+              (if prev
+                  (let-values ([(pch pcl) (gap-char-at gb prev)])
+                    (if (lisp-identifier-char? pch st)
+                        (loop prev)
+                        p))
+                  p)))))
+
+    ;; ── Scan forward to find end ──
+    (define end
+      (let loop ([p sym-pos])
+        (if (>= p len)
+            len
+            (let-values ([(ech ecl) (gap-char-at gb p)])
+              (if (lisp-identifier-char? ech st)
+                  (loop (+ p ecl))
+                  p)))))
+
+    (if (< start end)
+        (buffer-substring buf start end)
+        #f)))
 
 ;; ============================================================
 ;; Shift-select
