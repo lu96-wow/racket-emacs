@@ -34,10 +34,10 @@
                     (displayln (exn-message e))
                     (exit 1))])
     (screen-init!)
-    (ansi-buffer-alt-enable)
+    (format-alt-screen-enable)
     (display format-mouse-enable)
-    (use-color-auto!)
-    (ensure-face-cache-init!)
+    (detect-color-depth!)
+    (init-face-cache!)
     (flush-output)
 
     (init-global-bindings!)

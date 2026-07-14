@@ -27,13 +27,13 @@
  default-face region-face mode-line-face isearch-face isearch-fail-face
 
  ;; rendering integration
- face-at-point/id face-id-with-overlay
+ face-id-at-point face-id-with-overlay
 
  ;; face merging
  merge-face-attrs
 
  ;; global
- get-face-cache ensure-face-cache-init!)
+ current-face-cache init-face-cache!)
 
 ;; ============================================================
 ;; face-attrs
@@ -167,10 +167,10 @@
 
 (define (face-id-with-overlay buf pos overlay-name)
   (define base-name (face-at-pos buf pos))
-  (define fc (get-face-cache))
+  (define fc (current-face-cache))
   ;; If overlay is already the base face, no merge needed
   (if (eq? overlay-name base-name)
-      (face-at-point/id buf pos)
+      (face-id-at-point buf pos)
       (let* ([base-attrs  (face-attrs-by-name (or base-name default-face))]
              [overlay-attrs (face-attrs-by-name overlay-name)]
              [merged-attrs (merge-face-attrs base-attrs overlay-attrs)]
@@ -181,9 +181,9 @@
 ;; Rendering integration
 ;; ============================================================
 
-(define (face-at-point/id buf pos)
+(define (face-id-at-point buf pos)
   (define face-name (face-at-pos buf pos))
-  (define fc (get-face-cache))
+  (define fc (current-face-cache))
   (define fa (face-attrs-by-name (or face-name default-face)))
   (define rf (face-cache-lookup-or-realize! fc fa (color-depth)))
   (realized-face-id rf))
@@ -193,8 +193,8 @@
 ;; ============================================================
 
 (define global-face-cache (box #f))
-(define (get-face-cache) (unbox global-face-cache))
-(define (ensure-face-cache-init!)
+(define (current-face-cache) (unbox global-face-cache))
+(define (init-face-cache!)
   (unless (unbox global-face-cache)
     (set-box! global-face-cache (make-face-cache))))
 

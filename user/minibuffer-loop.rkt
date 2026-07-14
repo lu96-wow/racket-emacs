@@ -12,7 +12,7 @@
          "../platform/event.rkt"
          "../display/render.rkt")
 
-(provide read-from-minibuffer)
+(provide read-from-minibuffer!)
 
 (define (call-with-minibuffer frm prompt #:keymap km #:initial initial proc)
   (define saved-state (activate-minibuffer! frm prompt))
@@ -20,7 +20,7 @@
   (dynamic-wind void proc
     (λ () (deactivate-minibuffer! frm saved-state) (bottom-line-deactivate-input!))))
 
-(define (read-from-minibuffer prompt
+(define (read-from-minibuffer! prompt
                               #:keymap [km minibuffer-local-map]
                               #:initial [initial ""])
   (define frm (current-frame))

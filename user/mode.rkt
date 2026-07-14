@@ -27,12 +27,12 @@
   ((car pair) buf))
 
 (define (auto-setup-buffer! buf path)
-  (define ext (path-get-extension path))
+  (define ext (path-extension path))
   (for/or ([(name pair) (in-hash mode-setups)])
     (and (member ext (cdr pair))
          (begin ((car pair) buf) name))))
 
-(define (path-get-extension path)
+(define (path-extension path)
   (define s (if (path? path) (path->string path) path))
   (define dot-idx
     (let loop ([i (sub1 (string-length s))])

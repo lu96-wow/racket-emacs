@@ -22,7 +22,7 @@
  display-frame display-buffer flush-vbuffer!
  pos->row-col
  visual-line-lines render-visual-lines!
- render-mode-line! render-window compose-frame!
+ render-mode-line! render-window! compose-frame!
  recenter-point! update-frame-size!
  invalidate-frame-cache!
  screen-coord->buffer-pos)
@@ -127,7 +127,7 @@
         (define fid
           (if (and reg-active? (>= char-byte-pos reg-beg) (< char-byte-pos reg-end))
               (face-id-with-overlay buf char-byte-pos 'region)
-              (face-at-point/id buf char-byte-pos)))
+              (face-id-at-point buf char-byte-pos)))
         (vbuffer-put-char! vb r col ch #:face-id fid)
         (+ col cw))
       (when (visual-line-truncated? vl)
@@ -207,12 +207,12 @@
     (substring (string-append full-left (make-string pad #\-) pos-info) 0 cols) 'reverse))
 
 ;; ============================================================
-;; render-window
+;; render-window!
 ;; ============================================================
 
-(define (render-window w [force-cursor? #f])
+(define (render-window! w [force-cursor? #f])
   (define buf (window-buffer w))
-  (unless buf (error 'render-window "window has no buffer"))
+  (unless buf (error 'render-window! "window has no buffer"))
   (define rows (window-rows w))
   (define cols (window-cols w))
   (when (or (zero? rows) (zero? cols))
@@ -254,7 +254,7 @@
                 (values (window-top w) (+ (window-left w) bc))
                 (values cr cc)))
           ;; Normal window rendering
-          (let-values ([(sub-vb sr sc) (render-window w)])
+          (let-values ([(sub-vb sr sc) (render-window! w)])
             (vbuffer-blit! final-vb (window-top w) (window-left w) sub-vb)
             (if (window-selected? w)
                 (values (and sr (+ (window-top w) sr))
@@ -344,7 +344,7 @@
 ;; ============================================================
 
 (define (display-frame frm)
-  (ensure-face-cache-init!)
+  (init-face-cache!)
   (define leaves (filter (λ (w) (and (window-leaf? w) (not (window-mini? w))))
                          (frame-window-list frm)))
 
@@ -379,7 +379,7 @@
                          (= cols (vbuffer-cols cache))
                          (= rows (vbuffer-rows cache))
                          (vbuffer-cells cache)))
-  (define faces-by-id (face-cache-by-id (get-face-cache)))
+  (define faces-by-id (face-cache-by-id (current-face-cache)))
   (define out (open-output-string))
 
   (for ([r (in-range rows)])

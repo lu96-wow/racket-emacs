@@ -9,7 +9,7 @@
 (provide
  split-window-below split-window-right
  delete-window delete-other-windows other-window
- window-switch-buffer!)
+ switch-buffer-in-window!)
 
 (define (split-window-below #:size [size #f]) (split-window #f size))
 (define (split-window-right #:size [size #f]) (split-window #t size))
@@ -81,7 +81,7 @@
   (set-frame-selected-window! frm next-win) (define next-buf (window-buffer next-win))
   (when next-buf (set-buffer next-buf) (set-buffer-point! next-buf (window-point next-win))) next-win)
 
-(define (window-switch-buffer! w buf)
+(define (switch-buffer-in-window! w buf)
   (define old-buf (window-buffer w))
   (when (and old-buf (not (eq? old-buf buf)) (not (window-mini? w)))
     (set-marker-pos! (window-pointm w) (marker-pos (window-pointm w))))

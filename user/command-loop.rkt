@@ -18,7 +18,7 @@
          "../display/render.rkt"
          "minibuffer-loop.rkt")
 
-(provide command-loop run-command needs-render? lookup-key-in-buffer
+(provide command-loop run-command lookup-key-in-buffer
          init-minibuffer-bindings!)
 
 (define needs-render? (box #t))

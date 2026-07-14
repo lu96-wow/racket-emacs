@@ -12,7 +12,7 @@
 
  ;; screen
  format-clear-screen format-clear-to-eol
- ansi-buffer-alt-enable ansi-buffer-alt-disable
+ format-alt-screen-enable format-alt-screen-disable
 
  ;; attributes
  format-reset format-bold format-dim format-italic
@@ -27,7 +27,7 @@
  ansi-fg-16 ansi-bg-16
 
  ;; color capability detection
- use-color-auto! color-depth)
+ detect-color-depth! color-depth)
 
 ;; ============================================================
 ;; Cursor
@@ -48,8 +48,8 @@
 (define format-clear-screen "\e[2J")
 (define format-clear-to-eol "\e[K")
 
-(define (ansi-buffer-alt-enable)  (display "\e[?1049h"))
-(define (ansi-buffer-alt-disable) (display "\e[?1049l"))
+(define (format-alt-screen-enable)  (display "\e[?1049h"))
+(define (format-alt-screen-disable) (display "\e[?1049l"))
 
 ;; ============================================================
 ;; Text attributes
@@ -108,7 +108,7 @@
 
 (define color-depth (make-parameter 'truecolor)) ; 'truecolor | '256 | '16 | 'none
 
-(define (use-color-auto!)
+(define (detect-color-depth!)
   (define colorterm (getenv "COLORTERM"))
   (define term (getenv "TERM"))
   (cond

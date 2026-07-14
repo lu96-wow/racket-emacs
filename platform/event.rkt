@@ -16,10 +16,10 @@
  mouse-event-action mouse-event-shift? mouse-event-alt? mouse-event-ctrl?
 
  read-key-event! read-key-event/timeout!
- read-byte! read-byte/timeout
+ read-byte! read-byte!/timeout
  ESCDELAY CSI-MAX-BYTES
  csi-bytes->key-sequence
- parse-sgr-mouse-from-bytes
+ decode-sgr-mouse
  init-input-decode-map!)
 
 (define TAB 9)           (define LF 10)           (define CR 13)
@@ -45,14 +45,14 @@
   (if (bytes? evt) (bytes-ref evt 0)
       (error 'read-byte! "unexpected event: ~a" evt)))
 
-(define (read-byte/timeout timeout-sec)
+(define (read-byte!/timeout timeout-sec)
   (define evt (sync/timeout timeout-sec (make-stdin-evt)))
   (and (bytes? evt) (= (bytes-length evt) 1) (bytes-ref evt 0)))
 
 (define (read-csi-seq b2 [b3 #f])
   (let loop ([acc (if b3 (list ESC b2 b3) (list ESC b2))] [left CSI-MAX-BYTES])
     (if (zero? left) (list->bytes acc)
-        (let ([b (read-byte/timeout ESCDELAY)])
+        (let ([b (read-byte!/timeout ESCDELAY)])
           (cond [(not b) (list->bytes acc)]
                 [(<= CSI-FINAL-START b CSI-FINAL-END) (list->bytes (append acc (list b)))]
                 [else (loop (append acc (list b)) (sub1 left))])))))
@@ -64,7 +64,7 @@
                     [else 0]))
   (let loop ([n 0] [acc (bytes)])
     (if (>= n len) acc
-        (let ([b (read-byte/timeout UTF8-CONTINUATION-TIMEOUT)])
+        (let ([b (read-byte!/timeout UTF8-CONTINUATION-TIMEOUT)])
           (if b (loop (add1 n) (bytes-append acc (bytes b))) acc)))))
 
 (define (csi-bytes->key-sequence bstr)
@@ -74,7 +74,7 @@
   (read-key-event* read-byte! input-decode-map lookup-fn))
 
 (define (read-key-event/timeout! timeout-sec [input-decode-map #f] [lookup-fn #f])
-  (define b (read-byte/timeout timeout-sec))
+  (define b (read-byte!/timeout timeout-sec))
   (and b (read-key-event* (λ () b) input-decode-map lookup-fn)))
 
 (define (read-key-event* get-first-byte input-decode-map lookup-fn)
@@ -106,7 +106,7 @@
     [else (key-event #f #f #f #f 'unknown)]))
 
 (define (parse-escape-via-keymap decode-map lookup-fn)
-  (define b2 (read-byte/timeout ESCDELAY))
+  (define b2 (read-byte!/timeout ESCDELAY))
   (cond
     [(not b2) (key-event #f #f #t #f 'escape)]
     [(= b2 CSI-OPEN)
@@ -115,7 +115,7 @@
                  (= (bytes-ref seq-bytes 2) 60)
                  (let ([final (bytes-ref seq-bytes (sub1 (bytes-length seq-bytes)))])
                    (or (= final 77) (= final 109))))
-            (parse-sgr-mouse-from-bytes seq-bytes)]
+            (decode-sgr-mouse seq-bytes)]
            [else
             (if (and decode-map lookup-fn)
                 (let* ([ke-seq (csi-bytes->key-sequence seq-bytes)]
@@ -124,7 +124,7 @@
                       (key-event #f #f #t #f 'escape)))
                 (key-event #f #f #t #f 'escape))])]
     [(= b2 CSI-SS3)
-     (define b3 (read-byte/timeout ESCDELAY))
+     (define b3 (read-byte!/timeout ESCDELAY))
      (if (and decode-map lookup-fn)
          (let* ([ke-seq (list (key-event (integer->char ESC) #f #f #f #f)
                               (key-event #\O #f #f #f #f)
@@ -137,7 +137,7 @@
      (key-event (integer->char b2) #f #t #f #f)]
     [else (key-event #f #f #t #f 'escape)]))
 
-(define (parse-sgr-mouse-from-bytes seq)
+(define (decode-sgr-mouse seq)
   (define slen (bytes-length seq))
   (define final-b (bytes-ref seq (sub1 slen)))
   (define-values (cb _1)    (parse-mouse-field seq 3 #\;))

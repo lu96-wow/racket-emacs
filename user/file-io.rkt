@@ -12,7 +12,7 @@
 (define (find-file path)
   (define abs-path (path->complete-path (simplify-path path)))
   (define existing
-    (for/or ([b (in-hash-values (buffer-registry-by-name global-registry))])
+    (for/or ([b (in-hash-values (buffer-registry-by-name the-buffer-registry))])
       (and (buffer-filename b) (equal? (buffer-filename b) (path->string abs-path)) b)))
   (if existing
       (begin (set-buffer existing) existing)
