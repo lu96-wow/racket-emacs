@@ -40,9 +40,6 @@
     (ensure-face-cache-init!)
     (flush-output)
 
-    (init-fundamental-mode!)
-    (init-racket-mode!)
-    (init-all-mode-file-types!)
     (init-global-bindings!)
     (init-minibuffer-bindings!)
 
@@ -55,8 +52,7 @@
     (set-buffer-point! main-buf 0)
     (init-buffer-text-properties! main-buf)
     (set-buffer main-buf)
-    (set-buffer-mode! main-buf 'Racket)
-    (activate-highlight! main-buf)
+    (setup-buffer-mode! main-buf 'Racket)
 
     (define mini-buf (get-buffer-create " *minibuf*" #:inhibit-hooks? #t))
     (void (init-root-frame main-buf mini-buf (terminal-width) (terminal-height)))

@@ -1,14 +1,18 @@
 #lang racket
 
-;; user/racket.rkt — Racket mode
+;; user/racket.rkt — Racket mode: Lisp syntax + font-lock keywords
 
 (require "../kernel/syntax.rkt"
+         "../kernel/buffer.rkt"
          "standard-syntax.rkt"
          "mode.rkt"
          "racket-keywords.rkt"
+         "font-lock-activate.rkt"
          "fundamental.rkt")
 
-(provide racket-mode init-racket-mode!)
+(provide racket-font-lock-keywords)
+
+;; ── Lisp syntax table ──
 
 (define (make-lisp-syntax-table)
   (define table (make-syntax-table (make-standard-syntax-table)))
@@ -21,12 +25,14 @@
   (hash-set! classes #\| 'symbol)
   table)
 
-(define racket-mode
-  (define-mode 'Racket
-    #:keymap fundamental-keymap
-    #:syntax (make-lisp-syntax-table)
-    #:highlight-kw racket-font-lock-keywords
-    #:highlight-syntax? #t
-    #:file-types '(".rkt")))
+;; ── setup function ──
 
-(define (init-racket-mode!) (void))
+(define (setup-racket! buf)
+  (set-buffer-keymap! buf fundamental-keymap)
+  (set-buffer-syntax! buf (make-lisp-syntax-table))
+  (set-buffer-highlight-keywords! buf racket-font-lock-keywords)
+  (set-buffer-highlight-syntax?! buf #t)
+  (set-buffer-mode-name! buf 'Racket)
+  (activate-highlight! buf))
+
+(register-mode-setup! 'Racket setup-racket! '(".rkt"))

@@ -1,6 +1,9 @@
 #lang racket
 
-;; user/mode.rkt — Mode abstraction: define, register, switch
+;; user/mode.rkt — Flat mode setup: register named setup functions directly.
+;;
+;; No mode struct, no define-mode DSL.
+;; Each "mode" is just a (buffer -> void) function that writes to kernel hashes.
 
 (require "../kernel/buffer.rkt"
          "../kernel/keymap.rkt"
@@ -8,58 +11,32 @@
          "font-lock-activate.rkt")
 
 (provide
- define-mode
- mode? mode-name mode-keymap mode-syntax mode-highlight-kw mode-highlight-syntax?
- mode-activate
- set-buffer-mode!
- mode-for-path
- init-all-mode-file-types!)
+ setup-buffer-mode!    ; (buffer symbol -> void)  apply named setup
+ auto-setup-buffer!    ; (buffer path -> void)    auto-detect by filename
+ register-mode-setup!) ; (symbol (buffer->void) (listof string) -> void)
 
-(struct mode
-  (name keymap syntax highlight-kw highlight-syntax? activate) #:transparent)
+;; Internal: name → (cons setup-fn file-types)
+(define mode-setups (make-hash))
 
-(define mode-registry (make-hash))
-(define mode-file-types (make-hash))
+(define (register-mode-setup! name setup-fn file-types)
+  (hash-set! mode-setups name (cons setup-fn file-types)))
 
-(define (define-mode name
-                     #:keymap [km #f]
-                     #:syntax [st #f]
-                     #:highlight-kw [kw '()]
-                     #:highlight-syntax? [hs? #f]
-                     #:activate [afn #f]
-                     #:file-types [fts '()])
-  (define m (mode name km st kw hs? afn))
-  (hash-set! mode-registry name m)
-  (hash-set! mode-file-types name fts)
-  m)
+(define (setup-buffer-mode! buf name)
+  (define pair (hash-ref mode-setups name (λ () #f)))
+  (unless pair (error 'setup-buffer-mode! "unknown mode: ~a" name))
+  ((car pair) buf))
 
-(define (set-buffer-mode! buf target-mode)
-  (define m (hash-ref mode-registry target-mode (λ () #f)))
-  (unless m (error 'set-buffer-mode! "unknown mode: ~a" target-mode))
-  (define km (mode-keymap m))
-  (define st (mode-syntax m))
-  (when km (set-buffer-keymap! buf km))
-  (when st (set-buffer-syntax! buf st))
-  (set-buffer-highlight-keywords! buf (mode-highlight-kw m))
-  (set-buffer-highlight-syntax?! buf (mode-highlight-syntax? m))
-  (set-buffer-mode-name! buf (mode-name m))
-  (unless (null? (mode-highlight-kw m)) (activate-highlight! buf))
-  (define afn (mode-activate m)) (when afn (afn buf)))
-
-(define file-type->mode-name (make-parameter (hash)))
-
-(define (init-all-mode-file-types!)
-  (for ([(mn fts) (in-hash mode-file-types)])
-    (for ([ft (in-list fts)])
-      (file-type->mode-name (hash-set (file-type->mode-name) ft mn)))))
-
-(define (mode-for-path path)
+(define (auto-setup-buffer! buf path)
   (define ext (path-get-extension path))
-  (hash-ref (file-type->mode-name) ext
-            (λ () (hash-ref (file-type->mode-name) "" (λ () #f)))))
+  (for/or ([(name pair) (in-hash mode-setups)])
+    (and (member ext (cdr pair))
+         (begin ((car pair) buf) name))))
 
 (define (path-get-extension path)
   (define s (if (path? path) (path->string path) path))
-  (define dot-idx (let loop ([i (sub1 (string-length s))])
-                    (cond [(< i 0) #f] [(char=? (string-ref s i) #\.) i] [else (loop (sub1 i))])))
+  (define dot-idx
+    (let loop ([i (sub1 (string-length s))])
+      (cond [(< i 0) #f]
+            [(char=? (string-ref s i) #\.) i]
+            [else (loop (sub1 i))])))
   (if dot-idx (substring s dot-idx) ""))

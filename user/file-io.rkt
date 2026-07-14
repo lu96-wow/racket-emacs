@@ -5,8 +5,7 @@
 (require "../kernel/buffer.rkt"
          "../base/registry.rkt"
          "../platform/file-io.rkt"
-         "mode.rkt"
-         "font-lock-activate.rkt")
+         "mode.rkt")
 
 (provide find-file save-buffer buffer-file-name)
 
@@ -26,9 +25,7 @@
         (set-buffer-saved-modiff! buf (buffer-modiff buf))
         (set-buffer-point! buf 0)
         (set-buffer buf)
-        (define mn (mode-for-path abs-path))
-        (when mn (set-buffer-mode! buf mn))
-        (activate-highlight! buf)
+        (auto-setup-buffer! buf abs-path)
         buf)))
 
 (define (save-buffer)
