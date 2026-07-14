@@ -16,14 +16,16 @@
  char-expression-prefix? char-punctuation? char-symbol?
  ;; multi-char comment/string rules
  multi-char-rule multi-char-rule?
- multi-char-rule-tag multi-char-rule-start multi-char-rule-end multi-char-rule-nestable?)
+ multi-char-rule-tag multi-char-rule-start multi-char-rule-end
+ multi-char-rule-nestable? multi-char-rule-delim-capture?)
 
 ;; A multi-char-rule describes a two-character (or longer) delimiter pair.
-;;   tag      : symbol used as state name during scanning (e.g. 'block-comment)
-;;   start    : string that opens the region (e.g. "#|")
-;;   end      : string that closes the region (e.g. "|#")
-;;   nestable?: #t if nested open/close pairs are counted, #f otherwise
-(struct multi-char-rule (tag start end nestable?) #:transparent)
+;;   tag          : symbol used as state name during scanning (e.g. 'block-comment)
+;;   start        : string that opens the region (e.g. "#|")
+;;   end          : string that closes the region (e.g. "|#"), or #f for delim-capture
+;;   nestable?    : #t if nested open/close pairs are counted, #f otherwise
+;;   delim-capture?: #t for here-doc style (#<<DELIM ... DELIM), #f for fixed delimiters
+(struct multi-char-rule (tag start end nestable? delim-capture?) #:transparent)
 
 (struct syntax-table
   ([parent #:mutable] [classes #:mutable] [multi-rules #:mutable]) #:transparent)

@@ -75,6 +75,25 @@
                (and (char=? ch (string-ref s i))
                     (loop (add1 i) (+ p cl))))))))
 
+;; ── delim-capture helpers (for #<<DELIM ... DELIM style) ──
+
+;; Read a non-whitespace word starting at pos; returns (values word-str end-pos).
+(define (read-delim-word gb pos len)
+  (let loop ([p pos] [chars '()])
+    (if (>= p len)
+        (values (list->string (reverse chars)) p)
+        (let-values ([(ch cl) (gap-char-at gb p)])
+          (if (or (char=? ch #\space) (char=? ch #\tab)
+                  (char=? ch #\newline) (char=? ch #\return))
+              (values (list->string (reverse chars)) p)
+              (loop (+ p cl) (cons ch chars)))))))
+
+;; Is pos at the beginning of a line?
+(define (at-bol? gb pos)
+  (or (zero? pos)
+      (let ([prev (gap-prev-char-pos gb pos)])
+        (and prev (char=? (char-at gb prev) #\newline)))))
+
 ;; ============================================================
 ;; Syntactic pass — data-driven: reads rules from syntax-table
 ;; ============================================================
@@ -88,6 +107,7 @@
   (define depth 0)
   (define mark-start #f)
   (define current-rule #f)
+  (define current-delim #f)
 
   (let loop ([pos beg])
     (when (< pos len)
@@ -110,7 +130,16 @@
             (set! mark-start pos)
             (set! depth 1)
             (set! state (multi-char-rule-tag matched-rule))
-            (loop (skip-n gb pos (string-length (multi-char-rule-start matched-rule))))]
+            (define start-len (string-length (multi-char-rule-start matched-rule)))
+            (define after-start (skip-n gb pos start-len))
+            (if (multi-char-rule-delim-capture? matched-rule)
+                ;; heredoc: #<<DELIM — capture delimiter word, skip to next line
+                (let*-values ([(delim delim-end) (read-delim-word gb after-start len)]
+                              [(nl) (gap-scan-forward-byte gb delim-end (curry = #x0A))])
+                  (set! current-delim delim)
+                  (if (< nl len) (loop (add1 nl)) (loop len)))
+                ;; fixed-delimiter rule
+                (loop after-start))]
            [(and st (char-string-quote? ch st))
             (set! mark-start pos) (set! state 'string) (loop pos1)]
            [(and st (char-comment-start? ch st))
@@ -130,11 +159,32 @@
             (set! state 'normal) (loop pos1)]
            [else (loop pos1)])]
 
-        ;; ── multi-char rule state (state = rule tag, e.g. 'block-comment) ──
+        ;; ── multi-char rule state (state = rule tag, e.g. 'block-comment / 'heredoc) ──
         [else
          (define end-str (multi-char-rule-end current-rule))
          (define start-str (multi-char-rule-start current-rule))
          (cond
+           [(multi-char-rule-delim-capture? current-rule)
+            ;; heredoc: end when current-delim appears at beginning of line
+            (cond
+              [(and (at-bol? gb pos)
+                    (match-str-at gb pos len current-delim))
+               (define delim-end (skip-n gb pos (string-length current-delim)))
+               (cond
+                 [(>= delim-end len)
+                  (put-text-property buf mark-start delim-end 'face font-lock-comment-face)
+                  (set! state 'normal) (loop delim-end)]
+                 [(char=? (char-at gb delim-end) #\newline)
+                  (put-text-property buf mark-start (add1 delim-end) 'face font-lock-comment-face)
+                  (set! state 'normal) (loop (add1 delim-end))]
+                 [else
+                  (put-text-property buf pos pos1 'face font-lock-comment-face)
+                  (loop pos1)])]
+              [else
+               ;; Apply face incrementally — covers partial regions
+               ;; when the closing delimiter is outside the fontify range.
+               (put-text-property buf pos pos1 'face font-lock-comment-face)
+               (loop pos1)])]
            [(match-str-at gb pos len end-str)
             (set! depth (sub1 depth))
             (define pos2 (skip-n gb pos (string-length end-str)))
@@ -200,8 +250,23 @@
   (λ (buf start lendel lenins)
     (define changed-end (+ start (max lendel lenins)))
     (define gb (buffer-gap buf))
-    (define sol (let ([nl (gap-scan-backward-byte gb start (curry = #x0A))])
-                  (if (>= nl 0) (add1 nl) 0)))
-    (define eol (let ([nl (gap-scan-forward-byte gb changed-end (curry = #x0A))])
-                  (if (< nl (gap-byte-length gb)) nl (gap-byte-length gb))))
+    (define buflen (gap-byte-length gb))
+    (define line-start (let ([nl (gap-scan-backward-byte gb start (curry = #x0A))])
+                         (if (>= nl 0) (add1 nl) 0)))
+    ;; Extend backward by up to 15 lines so multi-line constructs
+    ;; (heredoc, block-comment) are entered in the correct state.
+    (define sol
+      (let loop ([pos line-start] [remaining 15])
+        (if (or (zero? pos) (zero? remaining))
+            pos
+            (let ([prev-nl (gap-scan-backward-byte gb (sub1 pos) (curry = #x0A))])
+              (if (>= prev-nl 0) (loop (add1 prev-nl) (sub1 remaining)) pos)))))
+    ;; Extend forward by up to 15 lines to include the closing delimiter
+    ;; of multi-line constructs.
+    (define eol
+      (let loop ([pos changed-end] [remaining 15])
+        (define nl (gap-scan-forward-byte gb pos (curry = #x0A)))
+        (if (or (>= nl buflen) (zero? remaining))
+            (if (< nl buflen) nl buflen)
+            (loop (add1 nl) (sub1 remaining)))))
     (font-lock-fontify-region buf sol eol)))

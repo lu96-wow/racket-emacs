@@ -25,7 +25,8 @@
   (hash-set! classes #\| 'symbol)
   ;; multi-character comment: block  (nestable)
   (set-syntax-table-multi-rules! table
-    (list (multi-char-rule 'block-comment (~a #\# #\|) (~a #\| #\#) #t)))
+    (list (multi-char-rule 'block-comment (~a #\# #\|) (~a #\| #\#) #t #f)
+          (multi-char-rule 'heredoc      "#<<"               #f               #f #t)))
   table)
 
 ;; ── setup function ──
