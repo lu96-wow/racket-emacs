@@ -10,12 +10,16 @@
  screen-init! screen-cleanup!
  terminal-width terminal-height
  get-window-size
+ terminal?
  STDIN_FILENO)
 
 (define libc (ffi-lib #f))
 (define tcgetattr (get-ffi-obj 'tcgetattr libc (_fun _int _pointer -> _int)))
 (define tcsetattr (get-ffi-obj 'tcsetattr libc (_fun _int _int _pointer -> _int)))
 (define ioctl     (get-ffi-obj 'ioctl libc (_fun _int _int _pointer -> _int)))
+(define isatty    (get-ffi-obj 'isatty libc (_fun _int -> _int)))
+
+(define (terminal?) (not (zero? (isatty STDIN_FILENO))))
 
 (define STDIN_FILENO 0)
 (define STDOUT_FILENO 1)
@@ -103,6 +107,8 @@
   (when cols (terminal-width cols)))
 
 (define (screen-init!)
+  (unless (terminal?)
+    (error 'screen-init! "stdin is not a TTY — run in a real terminal"))
   (enter-raw-mode!)
   (detect-terminal-size!))
 

@@ -18,6 +18,12 @@
          "user/global-bindings.rkt"
          "user/font-lock-activate.rkt")
 
+(module+ main
+  (unless (terminal?)
+    (displayln "This editor requires a real terminal (TTY).")
+    (displayln "Run directly in a terminal emulator, not a pipe or IDE.")
+    (exit 1)))
+
 (define input-decode-map (make-keymap))
 (void (init-input-decode-map! input-decode-map
   (λ (km seq ke) (define-key km seq ke))))
@@ -26,8 +32,6 @@
   (with-handlers ([exn:fail? (λ (e)
                     (screen-cleanup!)
                     (displayln (exn-message e))
-                    (displayln "This editor requires a real terminal (TTY).")
-                    (displayln "Run directly in a terminal emulator, not a pipe or IDE.")
                     (exit 1))])
     (screen-init!)
     (ansi-buffer-alt-enable)
