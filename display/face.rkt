@@ -33,7 +33,10 @@
  merge-face-attrs
 
  ;; global
- current-face-cache init-face-cache!)
+ current-face-cache init-face-cache!
+
+ ;; default colors
+ current-default-foreground current-default-background)
 
 ;; ============================================================
 ;; face-attrs
@@ -171,7 +174,9 @@
   ;; If overlay is already the base face, no merge needed
   (if (eq? overlay-name base-name)
       (face-id-at-point buf pos)
-      (let* ([base-attrs  (face-attrs-by-name (or base-name default-face))]
+      (let* ([base-attrs  (if base-name
+                              (face-attrs-by-name base-name)
+                              (effective-default-attrs))]
              [overlay-attrs (face-attrs-by-name overlay-name)]
              [merged-attrs (merge-face-attrs base-attrs overlay-attrs)]
              [rf (face-cache-lookup-or-realize! fc merged-attrs (color-depth))])
@@ -184,9 +189,27 @@
 (define (face-id-at-point buf pos)
   (define face-name (face-at-pos buf pos))
   (define fc (current-face-cache))
-  (define fa (face-attrs-by-name (or face-name default-face)))
+  (define fa (if face-name
+                 (face-attrs-by-name face-name)
+                 (effective-default-attrs)))
   (define rf (face-cache-lookup-or-realize! fc fa (color-depth)))
   (realized-face-id rf))
+
+;; ============================================================
+;; Default colors — dynamically configurable
+;; ============================================================
+
+(define current-default-foreground (make-parameter #f))
+(define current-default-background (make-parameter #f))
+
+(define (effective-default-attrs)
+  (define fg (current-default-foreground))
+  (define bg (current-default-background))
+  (if (or fg bg)
+      (apply make-face-attrs
+             (append (if fg (list attr-foreground fg) '())
+                     (if bg (list attr-background bg) '())))
+      (face-attrs-by-name default-face)))
 
 ;; ============================================================
 ;; Global face cache
@@ -210,4 +233,11 @@
                 (cons font-lock-constant-face (make-face-attrs 'foreground 1))
                 (cons font-lock-function-name-face (make-face-attrs 'weight 'bold))
                 (cons font-lock-type-face (make-face-attrs 'foreground 3 'weight 'bold))
-                (cons font-lock-variable-name-face (make-face-attrs))))
+                (cons font-lock-variable-name-face (make-face-attrs))
+                ;; Rainbow parens — background colors cycling by depth
+                (cons font-lock-paren-face-1 (make-face-attrs 'background 220))
+                (cons font-lock-paren-face-2 (make-face-attrs 'background 148))
+                (cons font-lock-paren-face-3 (make-face-attrs 'background 81))
+                (cons font-lock-paren-face-4 (make-face-attrs 'background 211))
+                (cons font-lock-paren-face-5 (make-face-attrs 'background 208))
+                (cons font-lock-paren-face-6 (make-face-attrs 'background 69))))

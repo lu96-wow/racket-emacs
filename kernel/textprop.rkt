@@ -15,7 +15,11 @@
  remove-text-properties
  buffer-prop-map
  init-buffer-text-properties!
- face-at-pos)
+ face-at-pos
+ ;; paren-depth (separate interval-map, co-exists with face)
+ put-paren-depth
+ get-paren-depth
+ clear-paren-depth!)
 
 ;; ============================================================
 ;; Per-buffer storage
@@ -86,3 +90,29 @@
 
 (define (face-at-pos buf pos)
   (get-text-property buf pos 'face #f))
+
+;; ============================================================
+;; paren-depth — separate interval-map for rainbow parens
+;; ============================================================
+
+(define paren-depth-table (make-hasheq))  ; buffer → interval-map
+
+(define (paren-depth-map buf)
+  (hash-ref paren-depth-table buf
+    (λ ()
+      (define im (make-interval-map))
+      (hash-set! paren-depth-table buf im)
+      im)))
+
+(define (put-paren-depth buf start end depth)
+  (when (< start end)
+    (interval-map-set! (paren-depth-map buf) start end depth)))
+
+(define (get-paren-depth buf pos [default #f])
+  (define im (hash-ref paren-depth-table buf (λ () #f)))
+  (if im (interval-map-ref im pos (λ () default)) default))
+
+(define (clear-paren-depth! buf start end)
+  (when (< start end)
+    (define im (hash-ref paren-depth-table buf (λ () #f)))
+    (when im (interval-map-remove! im start end))))

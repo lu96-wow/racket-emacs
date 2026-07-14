@@ -17,6 +17,9 @@
  font-lock-keyword-face font-lock-builtin-face
  font-lock-constant-face font-lock-function-name-face
  font-lock-type-face font-lock-variable-name-face
+ ;; paren-depth faces (protocol)
+ font-lock-paren-face-1 font-lock-paren-face-2 font-lock-paren-face-3
+ font-lock-paren-face-4 font-lock-paren-face-5 font-lock-paren-face-6
 
  ;; buffer-var config
  font-lock-defaults set-font-lock-defaults!
@@ -39,6 +42,21 @@
 (define font-lock-function-name-face 'font-lock-function-name-face)
 (define font-lock-type-face        'font-lock-type-face)
 (define font-lock-variable-name-face 'font-lock-variable-name-face)
+
+(define font-lock-paren-face-1 'font-lock-paren-face-1)
+(define font-lock-paren-face-2 'font-lock-paren-face-2)
+(define font-lock-paren-face-3 'font-lock-paren-face-3)
+(define font-lock-paren-face-4 'font-lock-paren-face-4)
+(define font-lock-paren-face-5 'font-lock-paren-face-5)
+(define font-lock-paren-face-6 'font-lock-paren-face-6)
+
+(define paren-depth-faces
+  (vector font-lock-paren-face-1
+          font-lock-paren-face-2
+          font-lock-paren-face-3
+          font-lock-paren-face-4
+          font-lock-paren-face-5
+          font-lock-paren-face-6))
 
 ;; ============================================================
 ;; Per-buffer config
@@ -229,19 +247,66 @@
             (sloop (max (add1 offset) me))))))))
 
 ;; ============================================================
+;; Paren-depth pass — rainbow brackets, data-driven via syntax-table
+;; ============================================================
+
+(define (fontify-paren-depth! buf beg end)
+  (define st (buffer-syntax-table buf))
+  (when st
+    (define gb (buffer-gap buf))
+    (define buflen (gap-byte-length gb))
+    (define real-end (min end buflen))
+
+    ;; ── Compute starting depth at `beg` by scanning from buffer start ──
+    (define start-depth
+      (let loop ([pos 0] [d 0])
+        (if (>= pos beg)
+            d
+            (let*-values ([(ch cl) (gap-char-at gb pos)]
+                          [(pos1) (+ pos cl)])
+              (cond [(char-open? ch st)  (loop pos1 (add1 d))]
+                    [(char-close? ch st) (loop pos1 (sub1 (max 0 d)))]
+                    [else (loop pos1 d)])))))
+
+    ;; ── Walk [beg, real-end) marking each bracket with depth face ──
+    (define depth-levels (vector-length paren-depth-faces))
+    (let loop ([pos beg] [depth start-depth])
+      (when (< pos real-end)
+        (let*-values ([(ch cl) (gap-char-at gb pos)]
+                      [(pos1) (+ pos cl)])
+          (cond
+            [(char-open? ch st)
+             ;; Skip if inside string/comment (syntax pass already set a face)
+             (unless (get-text-property buf pos 'face #f)
+               (define face-idx (modulo depth depth-levels))
+               (put-text-property buf pos pos1 'face
+                                  (vector-ref paren-depth-faces face-idx)))
+             (loop pos1 (add1 depth))]
+            [(char-close? ch st)
+             (define close-depth (sub1 (max 0 depth)))
+             (unless (get-text-property buf pos 'face #f)
+               (define face-idx (modulo close-depth depth-levels))
+               (put-text-property buf pos pos1 'face
+                                  (vector-ref paren-depth-faces face-idx)))
+             (loop pos1 close-depth)]
+            [else (loop pos1 depth)]))))))
+
+;; ============================================================
 ;; Public API
 ;; ============================================================
 
 (define (unfontify-region! buf beg end)
   (when (< beg end)
-    (remove-text-properties buf beg end '(face))))
+    (remove-text-properties buf beg end '(face))
+    (clear-paren-depth! buf beg end)))
 
 (define (fontify-region! buf beg end)
   (when (< beg end)
     (unfontify-region! buf beg end)
     (when (font-lock-syntax? buf)
       (fontify-syntax! buf beg end))
-    (fontify-keywords! buf beg end)))
+    (fontify-keywords! buf beg end)
+    (fontify-paren-depth! buf beg end)))
 
 (define (fontify-buffer! buf)
   (fontify-region! buf 0 (buffer-byte-length buf)))
