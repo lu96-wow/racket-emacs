@@ -1,0 +1,1 @@
+("9.2" ta6le ("04d5dd91ffe36fbe7ac7b64f9f1f9ed10323accd" . "ce6c87d731b5877ef804924836cf49a9a7c3e0a4") #"/home/lu96/work/editer/racket-emacs-rebuild/kernel/buffer.rkt" (collects #"data" #"interval-map.rkt") (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt"))

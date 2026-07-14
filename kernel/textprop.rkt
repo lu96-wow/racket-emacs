@@ -19,7 +19,8 @@
  ;; paren-depth (separate interval-map, co-exists with face)
  put-paren-depth
  get-paren-depth
- clear-paren-depth!)
+ clear-paren-depth!
+ paren-depth-map)
 
 ;; ============================================================
 ;; Per-buffer storage
@@ -43,8 +44,11 @@
 (define (init-buffer-text-properties! buf)
   (when (not (buffer-var buf 'textprop-initialized? #f))
     (set-buffer-var! buf 'textprop-initialized? #t)
-    (buffer-prop-map buf)  ; ensure exists
-    ;; Register after-change hook for interval adjustment (MUST run before font-lock)
+    (buffer-prop-map buf)   ; ensure face interval-map exists
+    (paren-depth-map buf)   ; ensure paren-depth interval-map exists
+    ;; Register after-change hook for face interval-map adjustment.
+    ;; (paren-depth adjustment is registered separately in
+    ;;  font-lock-activate so it always runs before fontification.)
     (define hm (buffer-hooks buf))
     (set-hook-manager-after-fns! hm
       (append (hook-manager-after-fns hm)

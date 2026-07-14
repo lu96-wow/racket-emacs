@@ -171,15 +171,26 @@
 (define (face-id-with-overlay buf pos overlay-name)
   (define base-name (face-at-pos buf pos))
   (define fc (current-face-cache))
-  ;; If overlay is already the base face, no merge needed
-  (if (eq? overlay-name base-name)
+  ;; Pre-compute paren-depth background so we can merge it into the result.
+  (define pd (get-paren-depth buf pos #f))
+  (define pd-bg
+    (and pd
+         (let* ([pd-face-name (vector-ref paren-depth-faces pd)]
+                [pd-attrs (face-attrs-by-name pd-face-name)])
+           (face-attrs-ref pd-attrs attr-background #f))))
+  ;; If overlay equals base face AND no paren-depth bg, just delegate.
+  (if (and (eq? overlay-name base-name) (not pd-bg))
       (face-id-at-point buf pos)
       (let* ([base-attrs  (if base-name
                               (face-attrs-by-name base-name)
                               (effective-default-attrs))]
              [overlay-attrs (face-attrs-by-name overlay-name)]
              [merged-attrs (merge-face-attrs base-attrs overlay-attrs)]
-             [rf (face-cache-lookup-or-realize! fc merged-attrs (color-depth))])
+             [final-attrs
+              (if pd-bg
+                  (merge-face-attrs merged-attrs (make-face-attrs attr-background pd-bg))
+                  merged-attrs)]
+             [rf (face-cache-lookup-or-realize! fc final-attrs (color-depth))])
         (realized-face-id rf))))
 
 ;; ============================================================
@@ -189,10 +200,21 @@
 (define (face-id-at-point buf pos)
   (define face-name (face-at-pos buf pos))
   (define fc (current-face-cache))
-  (define fa (if face-name
-                 (face-attrs-by-name face-name)
-                 (effective-default-attrs)))
-  (define rf (face-cache-lookup-or-realize! fc fa (color-depth)))
+  (define base-attrs (if face-name
+                         (face-attrs-by-name face-name)
+                         (effective-default-attrs)))
+  ;; If this position is inside brackets, merge the depth background.
+  (define pd (get-paren-depth buf pos #f))
+  (define merged-attrs
+    (if pd
+        (let* ([pd-face-name (vector-ref paren-depth-faces pd)]
+               [pd-attrs (face-attrs-by-name pd-face-name)]
+               [pd-bg (face-attrs-ref pd-attrs attr-background #f)])
+          (if pd-bg
+              (merge-face-attrs base-attrs (make-face-attrs attr-background pd-bg))
+              base-attrs))
+        base-attrs))
+  (define rf (face-cache-lookup-or-realize! fc merged-attrs (color-depth)))
   (realized-face-id rf))
 
 ;; ============================================================

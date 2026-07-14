@@ -22,6 +22,7 @@
  font-lock-paren-face-4 font-lock-paren-face-5 font-lock-paren-face-6
  font-lock-paren-face-7 font-lock-paren-face-8 font-lock-paren-face-9
  font-lock-paren-face-10 font-lock-paren-face-11 font-lock-paren-face-12
+ paren-depth-faces
 
  ;; buffer-var config
  font-lock-defaults set-font-lock-defaults!
@@ -272,6 +273,11 @@
     (define real-end (min end buflen))
 
     ;; ── Compute starting depth at `beg` by scanning from buffer start ──
+    ;;     IMPORTANT: do NOT skip faced brackets here!  When re-fontifying
+    ;;     after an edit, positions [0, beg) may still have face properties
+    ;;     from the previous pass (e.g. font-lock-paren-face-N on brackets).
+    ;;     Those brackets are REAL brackets, not string/comment brackets,
+    ;;     and must be counted for correct depth.
     (define start-depth
       (let loop ([pos 0] [d 0])
         (if (>= pos beg)
@@ -282,28 +288,41 @@
                     [(char-close? ch st) (loop pos1 (sub1 (max 0 d)))]
                     [else (loop pos1 d)])))))
 
-    ;; ── Walk [beg, real-end) marking each bracket with depth face ──
+    ;; Clear old paren-depth in this region so we can rebuild.
+    (clear-paren-depth! buf beg real-end)
+
+    ;; ── Walk [beg, real-end): mark brackets + set paren-depth on content ──
     (define depth-levels (vector-length paren-depth-faces))
     (let loop ([pos beg] [depth start-depth])
       (when (< pos real-end)
         (let*-values ([(ch cl) (gap-char-at gb pos)]
-                      [(pos1) (+ pos cl)])
+                      [(pos1) (+ pos cl)]
+                      [(faced?) (get-text-property buf pos 'face #f)])
           (cond
             [(char-open? ch st)
-             ;; Skip if inside string/comment (syntax pass already set a face)
-             (unless (get-text-property buf pos 'face #f)
+             ;; Always count depth for real brackets.
+             ;; Only SET face if this bracket is not already inside a
+             ;; string/comment (syntax/keyword pass already set a face).
+             (unless faced?
                (define face-idx (modulo depth depth-levels))
                (put-text-property buf pos pos1 'face
                                   (vector-ref paren-depth-faces face-idx)))
              (loop pos1 (add1 depth))]
             [(char-close? ch st)
              (define close-depth (sub1 (max 0 depth)))
-             (unless (get-text-property buf pos 'face #f)
+             (unless faced?
                (define face-idx (modulo close-depth depth-levels))
                (put-text-property buf pos pos1 'face
                                   (vector-ref paren-depth-faces face-idx)))
              (loop pos1 close-depth)]
-            [else (loop pos1 depth)]))))))
+            [else
+             ;; Non-bracket character at depth > 0: record its depth so the
+             ;; renderer can tint its background.  Depth index = (d-1) so it
+             ;; matches the enclosing opening bracket's face.
+             (when (positive? depth)
+               (define pd-idx (modulo (sub1 depth) depth-levels))
+               (put-paren-depth buf pos pos1 pd-idx))
+             (loop pos1 depth)]))))))
 
 ;; ============================================================
 ;; Public API
