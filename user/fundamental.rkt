@@ -4,7 +4,7 @@
 
 (require "../kernel/keymap.rkt"
          "../kernel/buffer.rkt"
-         "../kernel/syntax.rkt"
+         "standard-syntax.rkt"
          "../base/edit.rkt"
          "../base/keybind.rkt"
          "../base/window-ops.rkt"
