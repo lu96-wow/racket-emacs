@@ -169,13 +169,21 @@
   (define gb (buffer-gap buf))
   (let loop ([p (buffer-point buf)] [count n])
     (cond [(<= p 0) (set-buffer-point! buf 0)] [(<= count 0) (set-buffer-point! buf p)]
-          [else (define prev (gap-prev-char-pos gb p))
-           (if (or (< prev 0) (>= prev (gap-byte-length gb))) (set-buffer-point! buf 0)
-               (let-values ([(ch-prev clen) (gap-char-at gb prev)])
-                 (if (and (char-word? ch-prev st) (cjk-char? ch-prev)) (loop prev (sub1 count))
-                     (let ([p1 (gap-scan-backward-char gb (+ prev clen) (λ (ch) (not (char-word? ch st))))])
-                       (if (< p1 0) (loop 0 (sub1 count))
-                           (let-values ([(ch1 c1) (gap-char-at gb p1)]) (loop (+ p1 c1) (sub1 count))))))))])))
+          [else
+           ;; Skip backward over non-word chars first (like Emacs)
+           (define p1 (gap-scan-backward-char gb p (λ (ch) (char-word? ch st))))
+           (cond
+             [(< p1 0) (loop 0 (sub1 count))]
+             [(cjk-char? (let-values ([(ch cl) (gap-char-at gb p1)]) ch))
+              ;; CJK: single-char word
+              (loop p1 (sub1 count))]
+             [else
+              ;; Skip backward over word chars to find start of word
+              (define p2 (gap-scan-backward-char gb (+ p1 1) (λ (ch) (not (char-word? ch st)))))
+              (if (< p2 0)
+                  (loop 0 (sub1 count))
+                  (let-values ([(ch2 c2) (gap-char-at gb p2)])
+                    (loop (+ p2 c2) (sub1 count))))])])))
 
 ;; ============================================================
 ;; Shift-select

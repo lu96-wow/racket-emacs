@@ -10,7 +10,6 @@
          "platform/ansi.rkt"
          "platform/termios.rkt"
          "platform/event.rkt"
-         "display/render.rkt"
          "display/face.rkt"
          "user/mode.rkt"
          "user/fundamental.rkt"
