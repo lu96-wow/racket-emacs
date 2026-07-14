@@ -8,17 +8,28 @@
 (provide
  make-syntax-table syntax-table?
  syntax-table-parent syntax-table-classes
+ syntax-table-multi-rules set-syntax-table-multi-rules!
  set-syntax-table-parent!
  char-syntax
  char-word? char-whitespace? char-open? char-close?
  char-string-quote? char-comment-start? char-escape?
- char-expression-prefix? char-punctuation? char-symbol?)
+ char-expression-prefix? char-punctuation? char-symbol?
+ ;; multi-char comment/string rules
+ multi-char-rule multi-char-rule?
+ multi-char-rule-tag multi-char-rule-start multi-char-rule-end multi-char-rule-nestable?)
+
+;; A multi-char-rule describes a two-character (or longer) delimiter pair.
+;;   tag      : symbol used as state name during scanning (e.g. 'block-comment)
+;;   start    : string that opens the region (e.g. "#|")
+;;   end      : string that closes the region (e.g. "|#")
+;;   nestable?: #t if nested open/close pairs are counted, #f otherwise
+(struct multi-char-rule (tag start end nestable?) #:transparent)
 
 (struct syntax-table
-  ([parent #:mutable] [classes #:mutable]) #:transparent)
+  ([parent #:mutable] [classes #:mutable] [multi-rules #:mutable]) #:transparent)
 
 (define (make-syntax-table [parent #f])
-  (syntax-table parent (make-hash)))
+  (syntax-table parent (make-hash) '()))
 
 (define (char-syntax ch table)
   (and table

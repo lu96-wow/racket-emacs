@@ -23,6 +23,9 @@
   (hash-set! classes #\# 'expression-prefix)
   (hash-set! classes #\; 'comment-start)
   (hash-set! classes #\| 'symbol)
+  ;; multi-character comment: block  (nestable)
+  (set-syntax-table-multi-rules! table
+    (list (multi-char-rule 'block-comment (~a #\# #\|) (~a #\| #\#) #t)))
   table)
 
 ;; ── setup function ──

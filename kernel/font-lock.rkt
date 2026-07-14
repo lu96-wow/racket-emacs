@@ -8,7 +8,8 @@
 
 (require "buffer.rkt"
          "gap.rkt"
-         "textprop.rkt")
+         "textprop.rkt"
+         "syntax.rkt")
 
 (provide
  ;; face name symbols (protocol)
@@ -60,46 +61,92 @@
 (define (skip-n gb pos n) (let loop ([p pos] [i n]) (if (zero? i) p (loop (+ p (char-len gb p)) (sub1 i)))))
 
 ;; ============================================================
-;; Syntactic pass — strings, comments, block-comments
+;; Helpers — gap-aware string prefix match
+;; ============================================================
+
+;; Does string s match at byte position pos in gap-buffer gb (up to len)?
+(define (match-str-at gb pos len s)
+  (define slen (string-length s))
+  (and (<= (+ pos slen) len)  ; avoid overshooting if last bytes are partial
+       (let loop ([i 0] [p pos])
+         (if (= i slen)
+             #t
+             (let-values ([(ch cl) (gap-char-at gb p)])
+               (and (char=? ch (string-ref s i))
+                    (loop (add1 i) (+ p cl))))))))
+
+;; ============================================================
+;; Syntactic pass — data-driven: reads rules from syntax-table
 ;; ============================================================
 
 (define (font-lock-syntactic-pass buf beg end)
   (define gb (buffer-gap buf))
   (define len (min end (gap-byte-length gb)))
-  (define state 'normal) (define depth 0) (define mark-start #f)
+  (define st (buffer-syntax-table buf))
+  (define multi-rules (and st (syntax-table-multi-rules st)))
+  (define state 'normal)
+  (define depth 0)
+  (define mark-start #f)
+  (define current-rule #f)
+
   (let loop ([pos beg])
     (when (< pos len)
       (define ch (char-at gb pos))
       (define pos1 (+ pos (char-len gb pos)))
+
+      ;; ── find the first multi-char rule whose start matches at pos ──
+      (define matched-rule
+        (and multi-rules
+             (for/or ([r (in-list multi-rules)])
+               (and (match-str-at gb pos len (multi-char-rule-start r))
+                    r))))
+
       (case state
+        ;; ── normal state ──
         [(normal)
-         (cond [(char=? ch #\#)
-                (if (and (< pos1 len) (char=? (char-at gb pos1) #\|))
-                    (begin (set! mark-start pos) (set! depth 1)
-                           (set! state 'block-comment) (loop (skip-n gb pos 2)))
-                    (loop pos1))]
-               [(char=? ch #\") (set! mark-start pos) (set! state 'string) (loop pos1)]
-               [(char=? ch #\;)
-                (define nl (gap-scan-forward-byte gb pos (curry = #x0A)))
-                (define ce (min nl len))
-                (put-text-property buf pos ce 'face font-lock-comment-face)
-                (if (< nl len) (loop (add1 nl)) (loop len))]
-               [else (loop pos1)])]
+         (cond
+           [matched-rule
+            (set! current-rule matched-rule)
+            (set! mark-start pos)
+            (set! depth 1)
+            (set! state (multi-char-rule-tag matched-rule))
+            (loop (skip-n gb pos (string-length (multi-char-rule-start matched-rule))))]
+           [(and st (char-string-quote? ch st))
+            (set! mark-start pos) (set! state 'string) (loop pos1)]
+           [(and st (char-comment-start? ch st))
+            (define nl (gap-scan-forward-byte gb pos (curry = #x0A)))
+            (define ce (min nl len))
+            (put-text-property buf pos ce 'face font-lock-comment-face)
+            (if (< nl len) (loop (add1 nl)) (loop len))]
+           [else (loop pos1)])]
+
+        ;; ── string state ──
         [(string)
-         (cond [(char=? ch #\\) (if (< pos1 len) (loop (skip-n gb pos 2)) (loop len))]
-               [(char=? ch #\") (put-text-property buf mark-start pos1 'face font-lock-string-face)
-                (set! state 'normal) (loop pos1)]
-               [else (loop pos1)])]
-        [(block-comment)
-         (cond [(and (char=? ch #\|) (< pos1 len) (char=? (char-at gb pos1) #\#))
-                (set! depth (sub1 depth))
-                (define pos2 (skip-n gb pos 2))
-                (when (zero? depth) (put-text-property buf mark-start pos2 'face font-lock-comment-face)
-                      (set! state 'normal))
-                (loop pos2)]
-               [(and (char=? ch #\#) (< pos1 len) (char=? (char-at gb pos1) #\|))
-                (set! depth (add1 depth)) (loop (skip-n gb pos 2))]
-               [else (loop pos1)])]))))
+         (cond
+           [(and st (char-escape? ch st))
+            (if (< pos1 len) (loop (skip-n gb pos 2)) (loop len))]
+           [(and st (char-string-quote? ch st))
+            (put-text-property buf mark-start pos1 'face font-lock-string-face)
+            (set! state 'normal) (loop pos1)]
+           [else (loop pos1)])]
+
+        ;; ── multi-char rule state (state = rule tag, e.g. 'block-comment) ──
+        [else
+         (define end-str (multi-char-rule-end current-rule))
+         (define start-str (multi-char-rule-start current-rule))
+         (cond
+           [(match-str-at gb pos len end-str)
+            (set! depth (sub1 depth))
+            (define pos2 (skip-n gb pos (string-length end-str)))
+            (when (zero? depth)
+              (put-text-property buf mark-start pos2 'face font-lock-comment-face)
+              (set! state 'normal))
+            (loop pos2)]
+           [(and (multi-char-rule-nestable? current-rule)
+                 (match-str-at gb pos len start-str))
+            (set! depth (add1 depth))
+            (loop (skip-n gb pos (string-length start-str)))]
+           [else (loop pos1)])]))))
 
 ;; ============================================================
 ;; Keyword pass — regex match → text property
