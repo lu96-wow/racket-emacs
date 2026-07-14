@@ -286,7 +286,8 @@
     (hash-remove! t buf)))
 
 (define (buffer-syntax-table buf)
-  (buffer-local buf 'syntax-table #f))
+  (or (hash-ref syntax-table* buf (λ () #f))
+      (buffer-local buf 'syntax-table #f)))
 
 (define keymap-table (make-hasheq))
 (define mode-name-table (make-hasheq))
