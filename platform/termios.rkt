@@ -117,6 +117,7 @@
   (display "\e[?25h")       ; show cursor
   (display "\e[0m")          ; reset attributes
   (display "\e[?1049l")      ; exit alt-buffer
+  (display "\e[?2004l")      ; disable bracketed paste
   (display "\e[?1006l\e[?1002l\e[?1000l") ; disable mouse
   (flush-output)
   (exit-raw-mode!)

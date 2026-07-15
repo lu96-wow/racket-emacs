@@ -137,6 +137,13 @@
     (when (mouse-event? raw-ke)
       (handle-mouse-event raw-ke frm)
       (loop prefix-keys))
+    ;; ── Bracketed paste: insert all text as one undo-able operation ──
+    (when (string? raw-ke)
+      ;; Normalize line endings: \r\n → \n, \r → \n
+      (define cleaned
+        (string-replace (string-replace raw-ke "\r\n" "\n") "\r" "\n"))
+      (run-command (λ () (insert cleaned)))
+      (loop '()))
     (define ke (dispatch-event! raw-ke))
     (unless ke (loop prefix-keys))
     (when (key-event-cancel? ke)

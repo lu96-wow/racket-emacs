@@ -14,6 +14,9 @@
  format-clear-screen format-clear-to-eol
  format-alt-screen-enable format-alt-screen-disable
 
+ ;; bracketed paste
+ format-bracketed-paste-enable format-bracketed-paste-disable
+
  ;; attributes
  format-reset format-bold format-dim format-italic
  format-underline format-blink format-reverse
@@ -72,6 +75,13 @@
 
 (define format-mouse-disable
   "\e[?1006l\e[?1002l\e[?1000l")
+
+;; ============================================================
+;; Bracketed paste — captures pasted text as one operation
+;; ============================================================
+
+(define format-bracketed-paste-enable  "\e[?2004h")
+(define format-bracketed-paste-disable "\e[?2004l")
 
 ;; ============================================================
 ;; Color

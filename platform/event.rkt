@@ -111,7 +111,10 @@
     [(not b2) (key-event #f #f #t #f 'escape)]
     [(= b2 CSI-OPEN)
      (define seq-bytes (read-csi-seq b2))
-     (cond [(and (>= (bytes-length seq-bytes) 3)
+     ;; ── Bracketed paste: \e[200~ ... \e[201~ ──
+     (cond [(csi-bytes-equal? seq-bytes "200~")
+            (read-bracketed-paste)]
+           [(and (>= (bytes-length seq-bytes) 3)
                  (= (bytes-ref seq-bytes 2) 60)
                  (let ([final (bytes-ref seq-bytes (sub1 (bytes-length seq-bytes)))])
                    (or (= final 77) (= final 109))))
@@ -165,6 +168,58 @@
   (case mod [(2) (values #f #f #t)] [(3) (values #f #t #f)] [(4) (values #f #t #t)]
     [(5) (values #t #f #f)] [(6) (values #t #f #t)] [(7) (values #t #t #f)]
     [(8) (values #t #t #t)] [else (values #f #f #f)]))
+
+;; ============================================================
+;; Bracketed paste — read pasted text until \e[201~
+;; ============================================================
+
+;; Check if a CSI byte sequence (including ESC + [) equals a given parameter string.
+;; e.g. (csi-bytes-equal? seq "200~") checks for \e[200~
+(define (csi-bytes-equal? seq param-str)
+  (define slen (bytes-length seq))
+  (define plen (+ 2 (string-length param-str)))  ;; ESC + [ + param
+  (and (>= slen plen)
+       (let loop ([i 2])  ;; skip ESC and [
+         (if (< i plen)
+             (and (= (bytes-ref seq i) (char->integer (string-ref param-str (- i 2))))
+                  (loop (add1 i)))
+             #t))))
+
+;; Read characters until \e[201~, return the pasted text as a string.
+;; Uses blocking reads for reliability; multi-line paste text can be large.
+(define (read-bracketed-paste)
+  (define buf (open-output-bytes))
+  (let loop ()
+    (define b (read-byte!))  ;; blocking — paste data arrives in a burst
+    (cond
+      [(= b ESC)
+       ;; Possible end marker \e[201~
+       (define b2 (read-byte!))
+       (cond
+         [(= b2 CSI-OPEN)
+          (define b3 (read-byte!))
+          (define b4 (read-byte!))
+          (define b5 (read-byte!))
+          (define b6 (read-byte!))
+          (if (and (= b3 50) (= b4 48) (= b5 49) (= b6 126))
+              ;; \e[201~ → paste end
+              (bytes->string/utf-8 (get-output-bytes buf))
+              ;; Some other ESC sequence — include it all and continue
+              (begin
+                (display (bytes b) buf)
+                (display (bytes b2) buf)
+                (display (bytes b3) buf)
+                (display (bytes b4) buf)
+                (display (bytes b5) buf)
+                (display (bytes b6) buf)
+                (loop)))]
+         [else
+          (display (bytes b) buf)
+          (display (bytes b2) buf)
+          (loop)])]
+      [else
+       (display (bytes b) buf)
+       (loop)])))
 
 (define (init-input-decode-map! km define-key!)
   (define (bind str ke)

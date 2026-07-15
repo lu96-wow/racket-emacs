@@ -36,6 +36,7 @@
     (screen-init!)
     (format-alt-screen-enable)
     (display format-mouse-enable)
+    (display format-bracketed-paste-enable)
     (detect-color-depth!)
     (init-face-cache!)
     (flush-output)
