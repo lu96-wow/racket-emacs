@@ -28,6 +28,11 @@
  font-lock-defaults set-font-lock-defaults!
  font-lock-keywords font-lock-syntax? font-lock-case-fold?
 
+ ;; composable fontify passes
+ buffer-fontify-passes set-buffer-fontify-passes!
+ default-fontify-passes
+ fontify-syntax-pass fontify-keywords-pass fontify-paren-depth-pass
+
  ;; engine
  fontify-buffer! fontify-region!
  unfontify-region!
@@ -84,6 +89,36 @@
 (define (font-lock-keywords [buf (current-buffer)]) (first (font-lock-defaults buf)))
 (define (font-lock-syntax? [buf (current-buffer)]) (second (font-lock-defaults buf)))
 (define (font-lock-case-fold? [buf (current-buffer)]) (third (font-lock-defaults buf)))
+
+;; ============================================================
+;; Composable fontify passes — each is (buf beg end) -> void
+;; ============================================================
+
+(define fontify-passes-table (make-hasheq))  ; buffer → (listof (buf beg end -> void))
+
+(define (buffer-fontify-passes buf)
+  (hash-ref fontify-passes-table buf
+    (λ () default-fontify-passes)))
+
+(define (set-buffer-fontify-passes! buf passes)
+  (hash-set! fontify-passes-table buf passes))
+
+;; Guarded wrappers: each pass checks its own activation condition.
+(define (fontify-syntax-pass buf beg end)
+  (when (font-lock-syntax? buf)
+    (fontify-syntax! buf beg end)))
+
+(define (fontify-keywords-pass buf beg end)
+  ;; fontify-keywords! already guards on empty keyword list internally
+  (fontify-keywords! buf beg end))
+
+(define (fontify-paren-depth-pass buf beg end)
+  ;; fontify-paren-depth! already guards on missing syntax-table internally
+  (fontify-paren-depth! buf beg end))
+
+(define default-fontify-passes
+  (list fontify-syntax-pass
+        fontify-keywords-pass))
 
 ;; ============================================================
 ;; Helpers
@@ -336,10 +371,8 @@
 (define (fontify-region! buf beg end)
   (when (< beg end)
     (unfontify-region! buf beg end)
-    (when (font-lock-syntax? buf)
-      (fontify-syntax! buf beg end))
-    (fontify-keywords! buf beg end)
-    (fontify-paren-depth! buf beg end)))
+    (for ([pass (in-list (buffer-fontify-passes buf))])
+      (pass buf beg end))))
 
 (define (fontify-buffer! buf)
   (fontify-region! buf 0 (buffer-byte-length buf)))

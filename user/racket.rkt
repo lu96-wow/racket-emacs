@@ -4,6 +4,7 @@
 
 (require "../kernel/syntax.rkt"
          "../kernel/buffer.rkt"
+         "../kernel/font-lock.rkt"
          "standard-syntax.rkt"
          "mode.rkt"
          "racket-keywords.rkt"
@@ -37,6 +38,9 @@
   (set-buffer-highlight-keywords! buf racket-font-lock-keywords)
   (set-buffer-highlight-syntax?! buf #t)
   (set-buffer-mode-name! buf 'Racket)
+  ;; Racket mode: add rainbow paren-depth pass to the default syntax+keywords
+  (set-buffer-fontify-passes! buf
+    (append (buffer-fontify-passes buf) (list fontify-paren-depth-pass)))
   (activate-highlight! buf))
 
 (register-mode-setup! 'Racket setup-racket! '(".rkt"))
