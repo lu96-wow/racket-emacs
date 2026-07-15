@@ -4,7 +4,8 @@
 
 (require "../kernel/buffer.rkt"
          "../kernel/textprop.rkt"
-         "../kernel/font-lock.rkt")
+         "../kernel/font-lock.rkt"
+         "../kernel/syntax-cache.rkt")
 
 (provide activate-highlight!)
 
@@ -19,7 +20,14 @@
     (unless (memq paren-depth-adjust! (hook-manager-after-fns hm))
       (set-hook-manager-after-fns! hm
         (cons paren-depth-adjust! (hook-manager-after-fns hm))))
-    ;; font-lock re-fontification runs after interval adjustments.
+    ;; syntax-cache invalidation runs before fontification so the cache
+    ;; is stale for positions >= the edit point before font-lock queries it.
+    (define cache-invalidate-hook
+      (λ (b start lendel lenins) (syntax-cache-invalidate! b start)))
+    (unless (memq cache-invalidate-hook (hook-manager-after-fns hm))
+      (set-hook-manager-after-fns! hm
+        (append (hook-manager-after-fns hm) (list cache-invalidate-hook))))
+    ;; font-lock re-fontification runs after cache invalidation.
     (unless (memq fontify-after-change! (hook-manager-after-fns hm))
       (set-hook-manager-after-fns! hm
         (append (hook-manager-after-fns hm) (list fontify-after-change!))))))

@@ -5,7 +5,8 @@
 (require "../kernel/buffer.rkt"
          "../kernel/syntax.rkt"
          "../kernel/font-lock.rkt"
-         "../kernel/keymap.rkt")
+         "../kernel/keymap.rkt"
+         "../kernel/syntax-cache.rkt")
 
 (provide
  buffer-registry? buffer-registry-by-name
@@ -54,6 +55,7 @@
   (syntax-buffer-cleanup! b)
   (font-lock-buffer-cleanup! b)
   (keymap-buffer-cleanup! b)
+  (syntax-cache-buffer-cleanup! b)
   (define other (other-buffer #:visible-ok? #t #:exclude b))
   (when (and other (eq? b (current-buffer))) (set-buffer other)))
 

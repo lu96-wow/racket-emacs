@@ -22,6 +22,7 @@
  multi-char-rule-nestable? multi-char-rule-delim-capture?
  ;; per-buffer syntax table
  set-buffer-syntax! buffer-syntax-table
+ buffer-syntax-version
  ;; cleanup
  syntax-buffer-cleanup!)
 
@@ -64,13 +65,21 @@
 ;; and also a fallback via buffer-var 'syntax-table.
 
 (define syntax-table* (make-hasheq))
+(define syntax-version-table (make-hasheq))
 
 (define (buffer-syntax-table buf)
   (or (hash-ref syntax-table* buf (λ () #f))
       (buffer-var buf 'syntax-table #f)))
 
+(define (buffer-syntax-version buf)
+  (hash-ref syntax-version-table buf (λ () 0)))
+
 (define (set-buffer-syntax! buf st)
-  (hash-set! syntax-table* buf st))
+  (hash-set! syntax-table* buf st)
+  ;; Increment version so that cached parse-states are invalidated.
+  (hash-set! syntax-version-table buf
+             (add1 (hash-ref syntax-version-table buf (λ () 0)))))
 
 (define (syntax-buffer-cleanup! buf)
-  (hash-remove! syntax-table* buf))
+  (hash-remove! syntax-table* buf)
+  (hash-remove! syntax-version-table buf))
