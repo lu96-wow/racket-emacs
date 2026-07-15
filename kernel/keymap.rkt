@@ -18,6 +18,15 @@
  ;; operations
  define-key lookup-key
 
+ ;; per-buffer keymap state
+ set-buffer-keymap! buffer-keymap
+
+ ;; global keymap + buffer-aware lookup
+ global-keymap buffer-lookup-key
+
+ ;; cleanup
+ keymap-buffer-cleanup!
+
  ;; echo helper
  key-sequence->echo-string)
 
@@ -97,3 +106,29 @@
 
 (define (key-sequence->echo-string keys)
   (string-join (map key-event->description keys) " "))
+
+;; ============================================================
+;; Per-buffer keymap state
+;; ============================================================
+
+(define keymap-table (make-hasheq))
+(define (set-buffer-keymap! buf km) (hash-set! keymap-table buf km))
+(define (buffer-keymap buf) (hash-ref keymap-table buf (λ () #f)))
+
+;; ============================================================
+;; Global keymap + buffer-aware lookup
+;; ============================================================
+
+(define global-keymap (make-keymap))
+
+(define (buffer-lookup-key buf keys)
+  (define km (buffer-keymap buf))
+  (define b (and km (lookup-key km keys)))
+  (or b (lookup-key global-keymap keys)))
+
+;; ============================================================
+;; Cleanup
+;; ============================================================
+
+(define (keymap-buffer-cleanup! buf)
+  (hash-remove! keymap-table buf))

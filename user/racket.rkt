@@ -5,6 +5,7 @@
 (require "../kernel/syntax.rkt"
          "../kernel/buffer.rkt"
          "../kernel/font-lock.rkt"
+         "../kernel/keymap.rkt"
          "standard-syntax.rkt"
          "mode.rkt"
          "racket-keywords.rkt"

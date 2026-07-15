@@ -18,6 +18,10 @@
  font-lock-defaults set-font-lock-defaults!
  font-lock-keywords font-lock-syntax? font-lock-case-fold?
 
+ ;; per-buffer highlight config
+ set-buffer-highlight-keywords! buffer-highlight-keywords
+ set-buffer-highlight-syntax?! buffer-highlight-syntax?
+
  ;; composable fontify passes
  buffer-fontify-passes set-buffer-fontify-passes!
  default-fontify-passes
@@ -26,7 +30,10 @@
  ;; engine
  fontify-buffer! fontify-region!
  unfontify-region!
- fontify-after-change!)
+ fontify-after-change!
+
+ ;; cleanup
+ font-lock-buffer-cleanup!)
 
 ;; ============================================================
 ;; Per-buffer config
@@ -39,6 +46,22 @@
 (define (font-lock-keywords [buf (current-buffer)]) (first (font-lock-defaults buf)))
 (define (font-lock-syntax? [buf (current-buffer)]) (second (font-lock-defaults buf)))
 (define (font-lock-case-fold? [buf (current-buffer)]) (third (font-lock-defaults buf)))
+
+;; ============================================================
+;; Per-buffer highlight config
+;; ============================================================
+
+(define keywords-table (make-hasheq))
+(define syntax?-table (make-hasheq))
+
+(define (set-buffer-highlight-keywords! buf kw) (hash-set! keywords-table buf kw))
+(define (buffer-highlight-keywords buf) (hash-ref keywords-table buf '()))
+(define (set-buffer-highlight-syntax?! buf v) (hash-set! syntax?-table buf v))
+(define (buffer-highlight-syntax? buf) (hash-ref syntax?-table buf #f))
+
+(define (font-lock-buffer-cleanup! buf)
+  (hash-remove! keywords-table buf)
+  (hash-remove! syntax?-table buf))
 
 ;; ============================================================
 ;; Composable fontify passes — each is (buf beg end) -> void

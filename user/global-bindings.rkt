@@ -2,8 +2,7 @@
 
 ;; user/global-bindings.rkt — Global keymap bindings
 
-(require "../kernel/buffer.rkt"
-         "../kernel/keymap.rkt"
+(require "../kernel/keymap.rkt"
          "../kernel/window.rkt"
          "../base/keybind.rkt"
          "../base/edit.rkt"

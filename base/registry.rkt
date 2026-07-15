@@ -2,7 +2,10 @@
 
 ;; base/registry.rkt — Buffer registry (get-buffer-create, switch, kill)
 
-(require "../kernel/buffer.rkt")
+(require "../kernel/buffer.rkt"
+         "../kernel/syntax.rkt"
+         "../kernel/font-lock.rkt"
+         "../kernel/keymap.rkt")
 
 (provide
  buffer-registry? buffer-registry-by-name
@@ -48,6 +51,9 @@
   (for ([f (in-list (kill-buffer-hook))]) (f))
   (unregister-buffer! b)
   (buffer-cleanup! b)
+  (syntax-buffer-cleanup! b)
+  (font-lock-buffer-cleanup! b)
+  (keymap-buffer-cleanup! b)
   (define other (other-buffer #:visible-ok? #t #:exclude b))
   (when (and other (eq? b (current-buffer))) (set-buffer other)))
 

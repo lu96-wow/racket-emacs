@@ -2,7 +2,9 @@
 
 ;; kernel/syntax.rkt — Syntax table kernel primitives
 ;;
-;; struct + char-syntax + predicates only.
+;; struct + char-syntax + predicates + per-buffer storage.
+
+(require "buffer.rkt")
 ;; Standard and Lisp tables are in base/ and user/.
 
 (provide
@@ -17,7 +19,11 @@
  ;; multi-char comment/string rules
  multi-char-rule multi-char-rule?
  multi-char-rule-tag multi-char-rule-start multi-char-rule-end
- multi-char-rule-nestable? multi-char-rule-delim-capture?)
+ multi-char-rule-nestable? multi-char-rule-delim-capture?
+ ;; per-buffer syntax table
+ set-buffer-syntax! buffer-syntax-table
+ ;; cleanup
+ syntax-buffer-cleanup!)
 
 ;; A multi-char-rule describes a two-character (or longer) delimiter pair.
 ;;   tag          : symbol used as state name during scanning (e.g. 'block-comment)
@@ -50,3 +56,21 @@
 (define (char-expression-prefix? ch table) (eq? (char-syntax ch table) 'expression-prefix))
 (define (char-punctuation? ch table)     (eq? (char-syntax ch table) 'punctuation))
 (define (char-symbol? ch table)          (eq? (char-syntax ch table) 'symbol))
+
+;; ============================================================
+;; Per-buffer syntax table storage
+;; ============================================================
+;; A buffer may have a primary syntax-table set via set-buffer-syntax!,
+;; and also a fallback via buffer-var 'syntax-table.
+
+(define syntax-table* (make-hasheq))
+
+(define (buffer-syntax-table buf)
+  (or (hash-ref syntax-table* buf (λ () #f))
+      (buffer-var buf 'syntax-table #f)))
+
+(define (set-buffer-syntax! buf st)
+  (hash-set! syntax-table* buf st))
+
+(define (syntax-buffer-cleanup! buf)
+  (hash-remove! syntax-table* buf))

@@ -6,8 +6,7 @@
 
 (require "gap.rkt"
          "marker.rkt"
-         "undo.rkt"
-         "keymap.rkt")
+         "undo.rkt")
 
 (provide
  ;; struct
@@ -32,16 +31,8 @@
  ;; locals
  buffer-var set-buffer-var! kill-buffer-var!
  truncate-lines? set-truncate-lines?!
- buffer-syntax-table
  buffer-cleanup!
- set-buffer-keymap! buffer-keymap
- set-buffer-syntax!
- set-buffer-highlight-keywords! buffer-highlight-keywords
- set-buffer-highlight-syntax?! buffer-highlight-syntax?
  set-buffer-mode-name! buffer-mode-name
-
- ;; global keymap + lookup
- global-keymap buffer-lookup-key
 
  ;; change tracking
  buffer-change-region clear-buffer-change-region!
@@ -285,28 +276,6 @@
                  undo-proc-table redo-proc-table local-table change-table)])
     (hash-remove! t buf)))
 
-(define (buffer-syntax-table buf)
-  (or (hash-ref syntax-table* buf (λ () #f))
-      (buffer-var buf 'syntax-table #f)))
-
-(define keymap-table (make-hasheq))
-(define mode-name-table (make-hasheq))
-(define (set-buffer-keymap! buf km) (hash-set! keymap-table buf km))
-(define (buffer-keymap buf) (hash-ref keymap-table buf (λ () #f)))
-(define (set-buffer-mode-name! buf name) (hash-set! mode-name-table buf name))
-(define (buffer-mode-name buf) (hash-ref mode-name-table buf (λ () 'Fundamental)))
-
-(define syntax-table* (make-hasheq))
-(define keywords-table (make-hasheq))
-(define syntax?-table (make-hasheq))
-(define (set-buffer-syntax! buf st) (hash-set! syntax-table* buf st))
-(define (set-buffer-highlight-keywords! buf kw) (hash-set! keywords-table buf kw))
-(define (buffer-highlight-keywords buf) (hash-ref keywords-table buf '()))
-(define (set-buffer-highlight-syntax?! buf v) (hash-set! syntax?-table buf v))
-(define (buffer-highlight-syntax? buf) (hash-ref syntax?-table buf #f))
-
-(define global-keymap (make-keymap))
-(define (buffer-lookup-key buf keys)
-  (define km (buffer-keymap buf))
-  (define b (and km (lookup-key km keys)))
-  (or b (lookup-key global-keymap keys)))
+;; ── mode-name convenience (backed by buffer-var) ──
+(define (set-buffer-mode-name! buf name) (set-buffer-var! buf 'mode-name name))
+(define (buffer-mode-name buf) (buffer-var buf 'mode-name 'Fundamental))
