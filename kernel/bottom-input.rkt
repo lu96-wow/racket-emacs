@@ -17,6 +17,10 @@
  ;; echo
  bottom-line-set-echo! bottom-line-clear-echo!
 
+ ;; doc (multi-line documentation)
+ bottom-line-set-doc! bottom-line-clear-doc!
+ bottom-line-doc-lines
+
  ;; input lifecycle
  bottom-line-activate-input! bottom-line-deactivate-input!
  bottom-line-get-input bottom-line-get-prompt
@@ -35,8 +39,9 @@
 ;; ============================================================
 
 (struct bottom-line-state
-  ([mode #:mutable]       ; 'idle | 'echo | 'input
+  ([mode #:mutable]       ; 'idle | 'echo | 'input | 'doc
    [echo-text #:mutable]  ; string | #f
+   [doc-lines #:mutable]  ; (listof string) | #f — for 'doc mode
    [prompt #:mutable]     ; string | #f
    [input #:mutable]      ; string | #f
    [cursor #:mutable]     ; exact-nonnegative-integer? — position within input
@@ -46,7 +51,7 @@
   #:transparent)
 
 (define current-bottom-line
-  (make-parameter (bottom-line-state 'idle #f #f #f 0 '() -1)))
+  (make-parameter (bottom-line-state 'idle #f #f #f #f 0 '() -1)))
 
 (define (bottom-line-mode)
   (bottom-line-state-mode (current-bottom-line)))
@@ -64,6 +69,24 @@
   (define bl (current-bottom-line))
   (set-bottom-line-state-mode! bl 'idle)
   (set-bottom-line-state-echo-text! bl #f))
+
+;; ============================================================
+;; Doc — multi-line documentation in bottom area
+;; ============================================================
+
+(define (bottom-line-set-doc! lines)
+  (define bl (current-bottom-line))
+  (set-bottom-line-state-mode! bl 'doc)
+  (set-bottom-line-state-doc-lines! bl lines))
+
+(define (bottom-line-clear-doc!)
+  (define bl (current-bottom-line))
+  (unless (eq? (bottom-line-state-mode bl) 'input)
+    (set-bottom-line-state-mode! bl 'idle))
+  (set-bottom-line-state-doc-lines! bl #f))
+
+(define (bottom-line-doc-lines)
+  (bottom-line-state-doc-lines (current-bottom-line)))
 
 ;; ============================================================
 ;; Input lifecycle

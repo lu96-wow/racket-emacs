@@ -27,6 +27,7 @@
   (buffer-lookup-key buf keys))
 
 (define (run-command cmd [arg #f])
+  (bottom-line-clear-doc!)
   (define buf (current-buffer))
   (define urec (buffer-undo-rec buf))
   (unless (and (last-command) (eq? cmd (last-command)))

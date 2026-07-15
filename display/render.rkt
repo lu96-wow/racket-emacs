@@ -11,6 +11,7 @@
          "../kernel/marker.rkt"
          "../kernel/char-width.rkt"
          "../kernel/window.rkt"
+         "../kernel/bottom-input.rkt"
          "../base/registry.rkt"
          "../platform/ansi.rkt"
          "../platform/termios.rkt"
@@ -249,7 +250,7 @@
     (for/fold ([cr #f] [cc #f]) ([w (in-list leaves)])
       (if (window-mini? w)
           ;; Bottom line — render via unified bottom-line module
-          (let ([bc (bottom-line-render! final-vb (window-top w) (window-cols w))])
+          (let-values ([(bc bc-rows) (bottom-line-render! final-vb (window-top w) (window-cols w))])
             (if bc
                 (values (window-top w) (+ (window-left w) bc))
                 (values cr cc)))
@@ -345,6 +346,16 @@
 
 (define (display-frame frm)
   (init-face-cache!)
+
+  ;; 0. Adjust minibuffer height for doc mode before layout
+  (define mini (frame-minibuffer-window frm))
+  (when mini
+    (define needed (bottom-line-doc-rows))
+    (unless (= needed (window-desired-rows mini))
+      (set-window-desired-rows! mini needed)
+      (layout-frame! frm)
+      (invalidate-frame-cache! frm)))
+
   (define leaves (filter (λ (w) (and (window-leaf? w) (not (window-mini? w))))
                          (frame-window-list frm)))
 
