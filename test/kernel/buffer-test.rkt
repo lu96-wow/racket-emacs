@@ -1,7 +1,7 @@
 #lang racket
-;; test/protocol/buffer-test.rkt
+;; test/kernel/buffer-test.rkt
 (require rackunit
-         "../../protocol/buffer.rkt"
+         "../../kernel/buffer.rkt"
          "../../kernel/text.rkt"
          "../../kernel/undo/recorder.rkt")
 

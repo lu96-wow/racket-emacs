@@ -1,6 +1,6 @@
 #lang racket
 
-;; protocol/undo-exec.rkt — Undo/redo execution engine
+;; kernel/undo/exec.rkt — Undo/redo execution engine
 ;;
 ;; Pure functions that apply or reverse undo records on a text.
 ;; Composes: kernel/text.rkt + kernel/undo/record.rkt
@@ -9,8 +9,8 @@
 ;; the buffer when undo happens).  On redo, the range is empty —
 ;; execute-redo! treats it as a no-op.
 
-(require "../kernel/text.rkt"
-         "../kernel/undo/record.rkt")
+(require "../text.rkt"
+         "record.rkt")
 
 (provide
  execute-undo!   ; text undo-group -> void

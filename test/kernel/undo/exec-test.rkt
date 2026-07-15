@@ -1,9 +1,9 @@
 #lang racket
-;; test/protocol/undo-exec-test.rkt
+;; test/kernel/undo/exec-test.rkt
 (require rackunit
-         "../../protocol/undo-exec.rkt"
-         "../../kernel/text.rkt"
-         "../../kernel/undo/record.rkt")
+         "../../../kernel/undo/exec.rkt"
+         "../../../kernel/text.rkt"
+         "../../../kernel/undo/record.rkt")
 
 (test-case "undo-insert: delete the inserted range"
   (define tx (make-text "hello"))

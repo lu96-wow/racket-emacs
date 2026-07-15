@@ -1,15 +1,15 @@
 #lang racket
 
-;; protocol/buffer.rkt — Buffer: text + undo + change-tracking + point/mark
+;; kernel/buffer.rkt — Buffer: text + undo + change-tracking + point/mark
 ;;
 ;; Composes kernel/text.rkt, kernel/undo/*, and protocol/undo-exec.rkt
 ;; into a full editor buffer.  No hooks, no display — those are
 ;; orchestrated explicitly by the command loop.
 
-(require "../kernel/text.rkt"
-         "../kernel/undo/record.rkt"
-         "../kernel/undo/recorder.rkt"
-         "undo-exec.rkt")
+(require "text.rkt"
+         "undo/record.rkt"
+         "undo/recorder.rkt"
+         "undo/exec.rkt")
 
 (provide
  ;; struct + constructor
