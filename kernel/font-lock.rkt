@@ -331,24 +331,18 @@
     (let loop ([pos beg] [depth start-depth])
       (when (< pos real-end)
         (let*-values ([(ch cl) (gap-char-at gb pos)]
-                      [(pos1) (+ pos cl)]
-                      [(faced?) (get-text-property buf pos 'face #f)])
+                      [(pos1) (+ pos cl)])
           (cond
             [(char-open? ch st)
-             ;; Always count depth for real brackets.
-             ;; Only SET face if this bracket is not already inside a
-             ;; string/comment (syntax/keyword pass already set a face).
-             (unless faced?
-               (define face-idx (modulo depth depth-levels))
-               (put-text-property buf pos pos1 'face
-                                  (vector-ref paren-depth-faces face-idx)))
+             (define face-idx (modulo depth depth-levels))
+             (put-text-property buf pos pos1 'face
+                                (vector-ref paren-depth-faces face-idx))
              (loop pos1 (add1 depth))]
             [(char-close? ch st)
              (define close-depth (sub1 (max 0 depth)))
-             (unless faced?
-               (define face-idx (modulo close-depth depth-levels))
-               (put-text-property buf pos pos1 'face
-                                  (vector-ref paren-depth-faces face-idx)))
+             (define face-idx (modulo close-depth depth-levels))
+             (put-text-property buf pos pos1 'face
+                                (vector-ref paren-depth-faces face-idx))
              (loop pos1 close-depth)]
             [else
              ;; Non-bracket character at depth > 0: record its depth so the

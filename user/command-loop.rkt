@@ -28,6 +28,14 @@
 
 (define (run-command cmd [arg #f])
   (bottom-line-clear-doc!)
+  ;; Ensure the minibuffer shrinks back to 1 row if doc was just dismissed.
+  (define frm0 (current-frame))
+  (when frm0
+    (define mini (frame-minibuffer-window frm0))
+    (when (and mini (> (window-desired-rows mini) 1))
+      (set-window-desired-rows! mini 1)
+      (layout-frame! frm0)
+      (invalidate-frame-cache! frm0)))
   (define buf (current-buffer))
   (define urec (buffer-undo-rec buf))
   (unless (and (last-command) (eq? cmd (last-command)))
