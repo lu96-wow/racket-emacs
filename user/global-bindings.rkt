@@ -36,7 +36,5 @@
   (bind-key global-keymap "C-x 1" (λ () (delete-other-windows)))
   (bind-key global-keymap "C-x o" (λ () (other-window)))
   (bind-key global-keymap "C-g" (λ () (deactivate-mark)))
-  (bind-key global-keymap "C-y" yank)
-  (bind-key global-keymap "M-y" yank-pop)
   (bind-key global-keymap "C-c C-d" racket-doc-lookup)  ;; Racket doc lookup
   (bind-key global-keymap "C-x C-c" (λ () (screen-cleanup!) (exit))))

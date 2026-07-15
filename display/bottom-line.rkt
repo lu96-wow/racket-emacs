@@ -7,7 +7,6 @@
 ;; Pure rendering: no state mutation, no IO — just state → vbuffer cells.
 
 (require "../kernel/bottom-input.rkt"
-         "../kernel/window.rkt"
          "vbuffer.rkt")
 
 (provide bottom-line-render! bottom-line-doc-rows)

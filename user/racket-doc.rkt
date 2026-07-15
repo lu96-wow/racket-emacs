@@ -9,7 +9,6 @@
          scribble/xref
          scribble/blueboxes
          scribble/manual-struct
-         "../kernel/buffer.rkt"
          "../kernel/bottom-input.rkt"
          "../base/edit.rkt"
          racket/list
@@ -99,11 +98,9 @@
 ;; ============================================================
 
 (define (racket-doc-lookup)
-  (define buf (current-buffer))
-
   (let/ec return
     ;; 1. Get the symbol at point
-    (define sym-str (symbol-at-point #:buf buf))
+    (define sym-str (symbol-at-point))
     (unless sym-str
       (bottom-line-set-echo! "No identifier at point")
       (return))

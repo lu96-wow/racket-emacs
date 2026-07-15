@@ -11,7 +11,6 @@
          "../kernel/marker.rkt"
          "../kernel/char-width.rkt"
          "../kernel/window.rkt"
-         "../kernel/bottom-input.rkt"
          "../base/registry.rkt"
          "../platform/ansi.rkt"
          "../platform/termios.rkt"
