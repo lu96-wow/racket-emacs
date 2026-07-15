@@ -6,6 +6,7 @@
          "kernel/keymap.rkt"
          "kernel/window.rkt"
          "kernel/textprop.rkt"
+         "kernel/bottom-input.rkt"
          "base/registry.rkt"
          "platform/ansi.rkt"
          "platform/termios.rkt"
@@ -16,9 +17,11 @@
          "user/racket.rkt"
          "user/command-loop.rkt"
          "user/global-bindings.rkt"
-         "user/font-lock-activate.rkt")
+         "user/font-lock-activate.rkt"
+         "user/racket-complete.rkt")
 
 (module+ main
+  (current-completion-echo bottom-line-set-echo!)
   (unless (terminal?)
     (displayln "This editor requires a real terminal (TTY).")
     (displayln "Run directly in a terminal emulator, not a pipe or IDE.")

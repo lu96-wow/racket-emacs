@@ -11,6 +11,7 @@
          "../base/window-ops.rkt"
          "../base/registry.rkt"
          "../base/isearch.rkt"
+         "racket-complete.rkt"
          "mode.rkt")
 
 (provide fundamental-keymap)
@@ -58,6 +59,7 @@
 (bind-key fundamental-keymap "C-s" (λ () (isearch-forward)))
 (bind-key fundamental-keymap "C-r" (λ () (isearch-backward)))
 (bind-key fundamental-keymap "C-x t" (λ () (toggle-truncate-lines)))
+(bind-key fundamental-keymap "TAB" completion-at-point)
 
 ;; ── setup function ──
 

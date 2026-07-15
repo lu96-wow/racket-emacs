@@ -23,7 +23,7 @@
 
  ;; input lifecycle
  bottom-line-activate-input! bottom-line-deactivate-input!
- bottom-line-get-input bottom-line-get-prompt
+ bottom-line-get-input bottom-line-set-input! bottom-line-get-prompt
 
  ;; input editing
  bottom-line-insert! bottom-line-delete-backward! bottom-line-delete-forward!
@@ -116,6 +116,11 @@
 
 (define (bottom-line-get-input)
   (bottom-line-state-input (current-bottom-line)))
+
+(define (bottom-line-set-input! text)
+  (define bl (current-bottom-line))
+  (set-bottom-line-state-input! bl text)
+  (set-bottom-line-state-cursor! bl (string-length text)))
 
 (define (bottom-line-get-prompt)
   (bottom-line-state-prompt (current-bottom-line)))

@@ -204,7 +204,7 @@
            (let*-values ([(delim delim-end)
                           (read-delim-word gb after-start buflen)]
                          [(nl) (gap-scan-forward-byte
-                                gb delim-end (curry char=? #\newline))])
+                                gb delim-end (curry = #x0A))])
              (set-scanner-state-heredoc-delim! ss delim)
              (set-scanner-state-comment-nest-depth! ss 1)
              (if (< nl buflen) (add1 nl) buflen))]
@@ -234,7 +234,7 @@
         (set-scanner-state-in-comment?! ss #t)
         (set-scanner-state-comment-type! ss 'line)
         (set-scanner-state-comment-nest-depth! ss 1)
-        (define nl (gap-scan-forward-byte gb pos (curry char=? #\newline)))
+        (define nl (gap-scan-forward-byte gb pos (curry = #x0A)))
         ;; After consuming the line comment, exit comment state.
         ;; But we need to exit at the newline, not skip past it.
         (define end-pos (min nl buflen))

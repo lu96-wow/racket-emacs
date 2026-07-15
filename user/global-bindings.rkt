@@ -2,13 +2,18 @@
 
 ;; user/global-bindings.rkt — Global keymap bindings
 
-(require "../kernel/keymap.rkt"
+(require "../kernel/buffer.rkt"
+         "../kernel/keymap.rkt"
          "../kernel/window.rkt"
+         "../kernel/command.rkt"
+         "../kernel/completion.rkt"
          "../base/keybind.rkt"
          "../base/edit.rkt"
          "../base/window-ops.rkt"
          "../base/registry.rkt"
          "minibuffer-loop.rkt"
+         "command-loop.rkt"
+         "completion-ui.rkt"
          "file-io.rkt"
          "racket-doc.rkt"
          "../platform/termios.rkt")
@@ -24,11 +29,16 @@
         (switch-buffer-in-window! win buf)))))
   (bind-key global-keymap "C-x C-s" (λ () (save-buffer)))
   (bind-key global-keymap "C-x b" (λ ()
-    (define name (read-from-minibuffer! "Switch to buffer: "))
+    (define name (completing-read "Switch to buffer: " (map buffer-name (buffer-list))))
     (when (and name (not (equal? name "")))
       (define buf (switch-to-buffer name)) (define win (selected-window))
       (when (and win (not (window-mini? win)) (not (eq? (window-buffer win) buf)))
         (switch-buffer-in-window! win buf)))))
+  (bind-key global-keymap "M-x" (λ ()
+    (define name (completing-read "M-x " (command-names)))
+    (when name
+      (define cmd (lookup-command name))
+      (when (procedure? cmd) (run-command cmd)))))
   (bind-key global-keymap "C-x 2" (λ () (split-window-below)))
   (bind-key global-keymap "C-x 3" (λ () (split-window-right)))
   (bind-key global-keymap "C-x 0" (λ () (delete-window)))

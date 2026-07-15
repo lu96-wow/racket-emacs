@@ -16,7 +16,8 @@
          "../platform/event.rkt"
          "../platform/termios.rkt"
          "../display/render.rkt"
-         "minibuffer-loop.rkt")
+         "minibuffer-loop.rkt"
+         "completion-ui.rkt")
 
 (provide command-loop run-command lookup-key-in-buffer
          init-minibuffer-bindings!)
@@ -194,4 +195,5 @@
   (bind-key minibuffer-local-map "C-k" 'minibuffer-kill-line)
   (bind-key minibuffer-local-map "C-y" 'minibuffer-yank)
   (bind-key minibuffer-local-map "M-p" 'minibuffer-previous-history)
-  (bind-key minibuffer-local-map "M-n" 'minibuffer-next-history))
+  (bind-key minibuffer-local-map "M-n" 'minibuffer-next-history)
+  (bind-key minibuffer-local-map "TAB" minibuffer-complete))
