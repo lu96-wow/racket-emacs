@@ -4,7 +4,7 @@
 
 (require "../kernel/buffer.rkt"
          "../kernel/gap.rkt"
-         "../kernel/completion.rkt"
+         "../base/completion-algo.rkt"
          "../kernel/syntax.rkt"
          "../base/edit.rkt")
 

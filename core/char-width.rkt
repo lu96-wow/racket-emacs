@@ -6,7 +6,7 @@
 ;; Used by both edit.rkt (current-column) and display/render.rkt (layout).
 ;; Dependency: base/gap.rkt
 
-(require "gap.rkt")
+(require "../kernel/gap.rkt")
 
 (provide
  char-display-width        ; char → column count (0, 1, 2, or -1 for control)

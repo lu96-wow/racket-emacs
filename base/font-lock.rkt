@@ -9,7 +9,8 @@
 
 (require "../kernel/buffer.rkt"
          "../kernel/gap.rkt"
-         "../kernel/textprop.rkt"
+         "../kernel/gap-util.rkt"
+         "../core/textprop.rkt"
          "../kernel/syntax.rkt"
          "../kernel/category.rkt")
 
@@ -93,47 +94,8 @@
   (list fontify-syntax-pass
         fontify-keywords-pass))
 
-;; ============================================================
-;; Helpers
-;; ============================================================
-
-(define (char-at gb pos) (let-values ([(ch l) (gap-char-at gb pos)]) ch))
-(define (char-len gb pos) (let-values ([(ch l) (gap-char-at gb pos)]) l))
-(define (skip-n gb pos n) (let loop ([p pos] [i n]) (if (zero? i) p (loop (+ p (char-len gb p)) (sub1 i)))))
-
-;; ============================================================
-;; Helpers — gap-aware string prefix match
-;; ============================================================
-
-;; Does string s match at byte position pos in gap-buffer gb (up to len)?
-(define (match-str-at gb pos len s)
-  (define slen (string-length s))
-  (and (<= (+ pos slen) len)  ; avoid overshooting if last bytes are partial
-       (let loop ([i 0] [p pos])
-         (if (= i slen)
-             #t
-             (let-values ([(ch cl) (gap-char-at gb p)])
-               (and (char=? ch (string-ref s i))
-                    (loop (add1 i) (+ p cl))))))))
-
-;; ── delim-capture helpers (for #<<DELIM ... DELIM style) ──
-
-;; Read a non-whitespace word starting at pos; returns (values word-str end-pos).
-(define (read-delim-word gb pos len)
-  (let loop ([p pos] [chars '()])
-    (if (>= p len)
-        (values (list->string (reverse chars)) p)
-        (let-values ([(ch cl) (gap-char-at gb p)])
-          (if (or (char=? ch #\space) (char=? ch #\tab)
-                  (char=? ch #\newline) (char=? ch #\return))
-              (values (list->string (reverse chars)) p)
-              (loop (+ p cl) (cons ch chars)))))))
-
-;; Is pos at the beginning of a line?
-(define (at-bol? gb pos)
-  (or (zero? pos)
-      (let ([prev (gap-prev-char-pos gb pos)])
-        (and prev (char=? (char-at gb prev) #\newline)))))
+;; All gap-buffer helpers (char-at, char-len, skip-n, match-str-at,
+;; at-bol?, read-delim-word) are now in kernel/gap-util.rkt.
 
 ;; ============================================================
 ;; Syntactic pass — data-driven: reads rules from syntax-table

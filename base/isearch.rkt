@@ -7,7 +7,7 @@
          "../kernel/key-event.rkt"
          "../kernel/event-chain.rkt"
          "../kernel/bottom-input.rkt"
-         "../kernel/search.rkt")
+         "../core/search.rkt")
 
 (provide isearch-forward isearch-backward isearch-active?)
 

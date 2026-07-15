@@ -5,7 +5,7 @@
 ;; Layers: face-attrs (logical) → realized-face (ANSI bytes) → face-cache
 
 (require "../platform/ansi.rkt"
-         "../kernel/textprop.rkt"
+         "../core/textprop.rkt"
          "../kernel/category.rkt")
 
 (provide

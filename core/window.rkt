@@ -1,9 +1,9 @@
 #lang racket
 
-;; kernel/window.rkt — Window & frame kernel primitives
+;; core/window.rkt — Window & frame primitives (struct + layout)
 
-(require "buffer.rkt"
-         "marker.rkt")
+(require "../kernel/buffer.rkt"
+         "../kernel/marker.rkt")
 
 (provide
  ;; window

@@ -1,10 +1,10 @@
 #lang racket
 
-;; kernel/minibuffer.rkt — Minibuffer window lifecycle + shared history
+;; core/minibuffer.rkt — Minibuffer window lifecycle + shared history
 
 (require "window.rkt"
-         "keymap.rkt"
-         "buffer.rkt")
+         "../kernel/keymap.rkt"
+         "../kernel/buffer.rkt")
 
 (provide
  minibuffer-local-map

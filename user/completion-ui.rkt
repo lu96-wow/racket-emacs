@@ -7,8 +7,9 @@
 
 (require "../kernel/buffer.rkt"
          "../kernel/completion.rkt"
+         "../base/completion-algo.rkt"
          "../kernel/bottom-input.rkt"
-         "../kernel/minibuffer.rkt"
+         "../core/minibuffer.rkt"
          "../base/registry.rkt"
          "minibuffer-loop.rkt")
 
@@ -16,6 +17,9 @@
  completing-read
  current-completion-source
  minibuffer-complete)
+
+;; Default styles active for minibuffer completion.
+(completion-styles (list prefix-completion-style))
 
 ;; ============================================================
 ;; Per-completion state

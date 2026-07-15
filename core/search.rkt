@@ -4,7 +4,7 @@
 ;;
 ;; No display, no IO, no key handling.
 
-(require "gap.rkt")
+(require "../kernel/gap.rkt")
 
 (provide search-fwd search-bwd)
 

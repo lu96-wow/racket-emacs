@@ -4,8 +4,8 @@
 
 (require "kernel/buffer.rkt"
          "kernel/keymap.rkt"
-         "kernel/window.rkt"
-         "kernel/textprop.rkt"
+         "core/window.rkt"
+         "core/textprop.rkt"
          "kernel/bottom-input.rkt"
          "base/registry.rkt"
          "platform/ansi.rkt"

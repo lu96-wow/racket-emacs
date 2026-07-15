@@ -7,7 +7,7 @@
 ;; Dependency: buffer.rkt, gap.rkt
 
 (require data/interval-map
-         "buffer.rkt")
+         "../kernel/buffer.rkt")
 
 (provide
  put-text-property

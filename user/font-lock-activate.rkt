@@ -3,7 +3,7 @@
 ;; user/font-lock-activate.rkt — Font-lock activation for a buffer
 
 (require "../kernel/buffer.rkt"
-         "../kernel/textprop.rkt"
+         "../core/textprop.rkt"
          "../base/font-lock.rkt"
          "../base/syntax-cache.rkt")
 

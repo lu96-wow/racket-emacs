@@ -4,9 +4,8 @@
 
 (require "../kernel/buffer.rkt"
          "../kernel/keymap.rkt"
-         "../kernel/window.rkt"
+         "../core/window.rkt"
          "../kernel/command.rkt"
-         "../kernel/completion.rkt"
          "../base/keybind.rkt"
          "../base/edit.rkt"
          "../base/window-ops.rkt"

@@ -3,10 +3,10 @@
 ;; user/minibuffer-loop.rkt — Minibuffer read loop
 
 (require "../kernel/buffer.rkt"
-         "../kernel/window.rkt"
+         "../core/window.rkt"
          "../kernel/keymap.rkt"
          "../kernel/bottom-input.rkt"
-         "../kernel/minibuffer.rkt"
+         "../core/minibuffer.rkt"
          "../kernel/kill-ring.rkt"
          "../base/registry.rkt"
          "../platform/event.rkt"

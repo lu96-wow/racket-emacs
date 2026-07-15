@@ -2,7 +2,7 @@
 
 ;; base/window-ops.rkt — Window operations (composed from kernel primitives)
 
-(require "../kernel/window.rkt"
+(require "../core/window.rkt"
          "../kernel/buffer.rkt"
          "../kernel/marker.rkt")
 

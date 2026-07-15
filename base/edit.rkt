@@ -8,7 +8,7 @@
 (require "../kernel/buffer.rkt"
          "../kernel/gap.rkt"
          "../kernel/marker.rkt"
-         "../kernel/char-width.rkt"
+         "../core/char-width.rkt"
          "../kernel/kill-ring.rkt"
          "../kernel/syntax.rkt")
 

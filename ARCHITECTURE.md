@@ -7,44 +7,66 @@ user/         用户功能、keybinding、mode、command-loop
   ↓ 依赖
 display/      渲染管线 (face、vbuffer、render、bottom-line)
   ↓ 依赖
-base/         内核原语组合 (edit、isearch、registry、window-ops)
+base/         高层算法组合 (edit、isearch、font-lock、completion)
   ↓ 依赖
-kernel/       纯数据结构、零 IO (buffer、gap、marker、keymap、syntax、textprop …)
+core/         内核原语的最小组合 (buffer-factory、window-layout、textprop、search)
+  ↓ 依赖
+kernel/       纯数据结构 + 协议 (struct、predicate、accessor — 零扫描循环)
   ↓ 依赖
 platform/     终端/OS 交互 (event、termios、ansi、file-io)
 ```
 
-**规则：上层可依赖下层，下层不可依赖上层。kernel 零 IO、零 display 依赖。**
+**规则：上层可依赖下层，下层不可依赖上层。kernel 零 IO、零 display、零算法循环。**
+
+### 各层职责
+
+| 层 | 职责 | 允许的操作 |
+|----|------|-----------|
+| **kernel/** | 数据结构 + 协议定义 | struct、predicate、accessor、零循环 |
+| **core/** | 内核原语的最小组合 | make-buffer、layout-frame!、textprop map 操作、字符串搜索 |
+| **base/** | 高层算法 | 编辑命令、font-lock 引擎、增量搜索、补全匹配 |
+| **display/** | 终端渲染 | vbuffer、face、渲染管线 |
+| **user/** | 用户功能 | keybinding、mode、command-loop |
 
 ## 2. 模块清单
 
-### kernel/ — 纯数据核心
+### kernel/ — 纯数据结构 + 协议（零依赖、零循环、零算法）
 
 | 文件 | 职责 |
 |------|------|
-| `buffer.rkt` | Buffer struct、insert/delete（with hooks+undo）、point/mark/region、buffer-local 变量 |
-| `gap.rkt` | UTF-8 字节级 gap buffer（insert、delete、scan、char-at、display-width） |
+| `gap.rkt` | UTF-8 字节级 gap buffer（insert、delete、scan、char-at） |
+| `gap-util.rkt` | gap buffer 公共 helper（char-at、match-str-at、at-bol? 等） |
 | `marker.rkt` | Position marker（insert/delete 时自动调整） |
-| `undo.rkt` | 线性 undo/redo（insert/delete 记录、merge boundary） |
-| `keymap.rkt` | 稀疏前缀树 keymap |
-| `key-event.rkt` | Key event struct、分类（self-insert?/cancel?/return?） |
-| `syntax.rkt` | Syntax table（char classes + multi-char rules: block-comment/heredoc） |
-| `textprop.rkt` | interval-map 文本属性（face + paren-depth 双图） |
-| `font-lock.rkt` | 三级字体化：syntax pass → keyword pass → paren-depth pass |
-| `search.rkt` | 纯文本正向/反向搜索 |
-| `window.rkt` | Window/frame struct、layout、point/start marker |
-| `bottom-input.rkt` | 底部行状态机（idle/echo/doc/input 四种模式） |
-| `minibuffer.rkt` | Minibuffer 窗口生命周期 + history |
+| `undo.rkt` | 线性 undo/redo 记录类型 |
+| `keymap.rkt` | 稀疏前缀树 keymap（define-key、lookup-key） |
+| `key-event.rkt` | Key event struct、分类 predicate |
+| `syntax.rkt` | Syntax table（char classes + multi-char rules） |
+| `category.rkt` | 语义分类符号常量（keyword、string、comment、…） |
+| `completion.rkt` | 补全协议（source 类型、completion-style struct） |
+| `bottom-input.rkt` | 底部行状态机 struct（idle/echo/doc/input） |
 | `kill-ring.rkt` | 内部 kill ring（kill-new、yank、yank-pop） |
-| `command.rkt` | 命令注册表（define-command、lookup-command、command-names） |
+| `command.rkt` | 命令注册表（define-command、lookup-command） |
 | `event-chain.rkt` | 分层事件分发（node chain） |
-| `char-width.rkt` | 字符显示宽度（CJK/wcwidth） |
+| `buffer.rkt` | Buffer struct + point/mark/region + buffer-local 变量 + make-buffer 工厂 |
 
-### base/ — 内核原语组合
+### core/ — 内核原语的最小组合（产生可工作的核心对象）
+
+| 文件 | 职责 |
+|------|------|
+| `window.rkt` | Window/frame struct + layout-frame! + 构造器 |
+| `textprop.rkt` | interval-map 文本属性（face + paren-depth 双图） |
+| `minibuffer.rkt` | Minibuffer 窗口激活/停用 + history |
+| `search.rkt` | 纯文本正向/反向搜索 |
+| `char-width.rkt` | 字符显示宽度 + gap 级 display-width 扫描 |
+
+### base/ — 高层算法（组合 core + kernel 原语）
 
 | 文件 | 职责 |
 |------|------|
 | `edit.rkt` | 编辑命令：move、insert、delete、kill、yank、undo/redo、symbol-at-point |
+| `font-lock.rkt` | 三级字体化引擎：syntax pass → keyword pass → paren-depth pass |
+| `syntax-cache.rkt` | 增量 parse-state 缓存（buffer-parse-state、matching-paren） |
+| `completion-algo.rkt` | 补全算法（candidates 匹配、默认 style 实现） |
 | `isearch.rkt` | 增量搜索（forward/backward） |
 | `registry.rkt` | Buffer 注册表（get-buffer-create、kill-buffer、rename） |
 | `window-ops.rkt` | 窗口操作：split、delete、other、switch-buffer |
