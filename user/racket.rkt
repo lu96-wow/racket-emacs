@@ -4,7 +4,7 @@
 
 (require "../kernel/syntax.rkt"
          "../kernel/buffer.rkt"
-         "../kernel/font-lock.rkt"
+         "../base/font-lock.rkt"
          "../kernel/keymap.rkt"
          "standard-syntax.rkt"
          "mode.rkt"

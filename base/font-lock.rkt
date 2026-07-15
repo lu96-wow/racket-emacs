@@ -1,17 +1,17 @@
 #lang racket
 
-;; kernel/font-lock.rkt — Buffer-level fontification engine
+;; base/font-lock.rkt — Buffer-level fontification engine
 ;;
 ;; Pure buffer operations: scans text, writes 'face text properties.
 ;; Category symbols (protocol) are in category.rkt; visual attributes
 ;; are in display/face.rkt.
 ;; Language-specific keyword lists are in user/ (e.g. user/racket-keywords.rkt).
 
-(require "buffer.rkt"
-         "gap.rkt"
-         "textprop.rkt"
-         "syntax.rkt"
-         "category.rkt")
+(require "../kernel/buffer.rkt"
+         "../kernel/gap.rkt"
+         "../kernel/textprop.rkt"
+         "../kernel/syntax.rkt"
+         "../kernel/category.rkt")
 
 (provide
  ;; buffer-var config

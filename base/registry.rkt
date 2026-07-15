@@ -4,9 +4,9 @@
 
 (require "../kernel/buffer.rkt"
          "../kernel/syntax.rkt"
-         "../kernel/font-lock.rkt"
+         "font-lock.rkt"
          "../kernel/keymap.rkt"
-         "../kernel/syntax-cache.rkt")
+         "syntax-cache.rkt")
 
 (provide
  buffer-registry? buffer-registry-by-name

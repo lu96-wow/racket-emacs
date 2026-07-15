@@ -4,8 +4,8 @@
 
 (require "../kernel/buffer.rkt"
          "../kernel/textprop.rkt"
-         "../kernel/font-lock.rkt"
-         "../kernel/syntax-cache.rkt")
+         "../base/font-lock.rkt"
+         "../base/syntax-cache.rkt")
 
 (provide activate-highlight!)
 

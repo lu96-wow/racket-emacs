@@ -1,6 +1,6 @@
 #lang racket
 
-;; kernel/syntax-cache.rkt — Incremental parse-state cache
+;; base/syntax-cache.rkt — Incremental parse-state cache
 ;;
 ;; Caches (pos → parse-state) per buffer so that repeated queries
 ;; (font-lock, matching-paren, forward-sexp) are O(1) after the
@@ -16,9 +16,9 @@
 ;;   - Query past end of buffer: returns terminal state at ZV.
 ;;   - Empty/initial cache on first query: scans from BEGV.
 
-(require "buffer.rkt"
-         "gap.rkt"
-         "syntax.rkt")
+(require "../kernel/buffer.rkt"
+         "../kernel/gap.rkt"
+         "../kernel/syntax.rkt")
 
 
 ;; ============================================================
