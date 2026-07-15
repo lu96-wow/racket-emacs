@@ -6,7 +6,7 @@
 
 (require "../platform/ansi.rkt"
          "../kernel/textprop.rkt"
-         "../kernel/font-lock.rkt")
+         "../kernel/category.rkt")
 
 (provide
  ;; face-attrs
@@ -244,29 +244,29 @@
     (set-box! global-face-cache (make-face-cache))))
 
 ;; ============================================================
-;; Font-lock face definitions
+;; Semantic category → face definitions
 ;; ============================================================
 
 (for-each (λ (pair) (unless (face-defined? (car pair)) (defface (car pair) (cdr pair))))
-          (list (cons font-lock-string-face (make-face-attrs 'foreground 2))
-                (cons font-lock-comment-face (make-face-attrs 'foreground 6 'weight 'light))
-                (cons font-lock-keyword-face (make-face-attrs 'foreground 4 'weight 'bold))
-                (cons font-lock-builtin-face (make-face-attrs 'foreground 4))
-                (cons font-lock-constant-face (make-face-attrs 'foreground 1))
-                (cons font-lock-function-name-face (make-face-attrs 'weight 'bold))
-                (cons font-lock-type-face (make-face-attrs 'foreground 3 'weight 'bold))
-                (cons font-lock-variable-name-face (make-face-attrs))
+          (list (cons category-string (make-face-attrs 'foreground 2))
+                (cons category-comment (make-face-attrs 'foreground 6 'weight 'light))
+                (cons category-keyword (make-face-attrs 'foreground 4 'weight 'bold))
+                (cons category-builtin (make-face-attrs 'foreground 4))
+                (cons category-constant (make-face-attrs 'foreground 1))
+                (cons category-function-name (make-face-attrs 'weight 'bold))
+                (cons category-type (make-face-attrs 'foreground 3 'weight 'bold))
+                (cons category-variable-name (make-face-attrs))
                 ;; Rainbow parens — 12 depth levels, 30% opacity dark theme (2× brighter)
                 ;; Circular rotated: orange (was 8) → 1, all others shifted
-                (cons font-lock-paren-face-1  (make-face-attrs 'background (list 76 54 24)))
-                (cons font-lock-paren-face-2  (make-face-attrs 'background (list 24 60 30)))
-                (cons font-lock-paren-face-3  (make-face-attrs 'background (list 30 54 76)))
-                (cons font-lock-paren-face-4  (make-face-attrs 'background (list 76 30 48)))
-                (cons font-lock-paren-face-5  (make-face-attrs 'background (list 66 76 30)))
-                (cons font-lock-paren-face-6  (make-face-attrs 'background (list 76 42 30)))
-                (cons font-lock-paren-face-7  (make-face-attrs 'background (list 30 66 42)))
-                (cons font-lock-paren-face-8  (make-face-attrs 'background (list 30 48 76)))
-                (cons font-lock-paren-face-9  (make-face-attrs 'background (list 76 30 66)))
-                (cons font-lock-paren-face-10 (make-face-attrs 'background (list 76 64 30)))
-                (cons font-lock-paren-face-11 (make-face-attrs 'background (list 30 76 70)))
-                (cons font-lock-paren-face-12 (make-face-attrs 'background (list 60 30 76)))))
+                (cons paren-depth-face-1  (make-face-attrs 'background (list 76 54 24)))
+                (cons paren-depth-face-2  (make-face-attrs 'background (list 24 60 30)))
+                (cons paren-depth-face-3  (make-face-attrs 'background (list 30 54 76)))
+                (cons paren-depth-face-4  (make-face-attrs 'background (list 76 30 48)))
+                (cons paren-depth-face-5  (make-face-attrs 'background (list 66 76 30)))
+                (cons paren-depth-face-6  (make-face-attrs 'background (list 76 42 30)))
+                (cons paren-depth-face-7  (make-face-attrs 'background (list 30 66 42)))
+                (cons paren-depth-face-8  (make-face-attrs 'background (list 30 48 76)))
+                (cons paren-depth-face-9  (make-face-attrs 'background (list 76 30 66)))
+                (cons paren-depth-face-10 (make-face-attrs 'background (list 76 64 30)))
+                (cons paren-depth-face-11 (make-face-attrs 'background (list 30 76 70)))
+                (cons paren-depth-face-12 (make-face-attrs 'background (list 60 30 76)))))

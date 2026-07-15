@@ -1,29 +1,19 @@
 #lang racket
 
-;; core/font-lock.rkt — Buffer-level fontification engine
+;; kernel/font-lock.rkt — Buffer-level fontification engine
 ;;
 ;; Pure buffer operations: scans text, writes 'face text properties.
-;; Face names are symbols (protocol), visual attributes are in display/face.rkt.
-;; Language-specific keyword lists are in modes/ (e.g. modes/racket-keywords.rkt).
+;; Category symbols (protocol) are in category.rkt; visual attributes
+;; are in display/face.rkt.
+;; Language-specific keyword lists are in user/ (e.g. user/racket-keywords.rkt).
 
 (require "buffer.rkt"
          "gap.rkt"
          "textprop.rkt"
-         "syntax.rkt")
+         "syntax.rkt"
+         "category.rkt")
 
 (provide
- ;; face name symbols (protocol)
- font-lock-string-face font-lock-comment-face
- font-lock-keyword-face font-lock-builtin-face
- font-lock-constant-face font-lock-function-name-face
- font-lock-type-face font-lock-variable-name-face
- ;; paren-depth faces (protocol)
- font-lock-paren-face-1 font-lock-paren-face-2 font-lock-paren-face-3
- font-lock-paren-face-4 font-lock-paren-face-5 font-lock-paren-face-6
- font-lock-paren-face-7 font-lock-paren-face-8 font-lock-paren-face-9
- font-lock-paren-face-10 font-lock-paren-face-11 font-lock-paren-face-12
- paren-depth-faces
-
  ;; buffer-var config
  font-lock-defaults set-font-lock-defaults!
  font-lock-keywords font-lock-syntax? font-lock-case-fold?
@@ -37,46 +27,6 @@
  fontify-buffer! fontify-region!
  unfontify-region!
  fontify-after-change!)
-
-;; ============================================================
-;; Face names (protocol symbols, no colors here)
-;; ============================================================
-
-(define font-lock-string-face      'font-lock-string-face)
-(define font-lock-comment-face     'font-lock-comment-face)
-(define font-lock-keyword-face     'font-lock-keyword-face)
-(define font-lock-builtin-face     'font-lock-builtin-face)
-(define font-lock-constant-face    'font-lock-constant-face)
-(define font-lock-function-name-face 'font-lock-function-name-face)
-(define font-lock-type-face        'font-lock-type-face)
-(define font-lock-variable-name-face 'font-lock-variable-name-face)
-
-(define font-lock-paren-face-1 'font-lock-paren-face-1)
-(define font-lock-paren-face-2 'font-lock-paren-face-2)
-(define font-lock-paren-face-3 'font-lock-paren-face-3)
-(define font-lock-paren-face-4 'font-lock-paren-face-4)
-(define font-lock-paren-face-5 'font-lock-paren-face-5)
-(define font-lock-paren-face-6 'font-lock-paren-face-6)
-(define font-lock-paren-face-7 'font-lock-paren-face-7)
-(define font-lock-paren-face-8 'font-lock-paren-face-8)
-(define font-lock-paren-face-9 'font-lock-paren-face-9)
-(define font-lock-paren-face-10 'font-lock-paren-face-10)
-(define font-lock-paren-face-11 'font-lock-paren-face-11)
-(define font-lock-paren-face-12 'font-lock-paren-face-12)
-
-(define paren-depth-faces
-  (vector font-lock-paren-face-1
-          font-lock-paren-face-2
-          font-lock-paren-face-3
-          font-lock-paren-face-4
-          font-lock-paren-face-5
-          font-lock-paren-face-6
-          font-lock-paren-face-7
-          font-lock-paren-face-8
-          font-lock-paren-face-9
-          font-lock-paren-face-10
-          font-lock-paren-face-11
-          font-lock-paren-face-12))
 
 ;; ============================================================
 ;; Per-buffer config
@@ -213,7 +163,7 @@
            [(and st (char-comment-start? ch st))
             (define nl (gap-scan-forward-byte gb pos (curry = #x0A)))
             (define ce (min nl len))
-            (put-text-property buf pos ce 'face font-lock-comment-face)
+            (put-text-property buf pos ce 'face category-comment)
             (if (< nl len) (loop (add1 nl)) (loop len))]
            [else (loop pos1)])]
 
@@ -223,7 +173,7 @@
            [(and st (char-escape? ch st))
             (if (< pos1 len) (loop (skip-n gb pos 2)) (loop len))]
            [(and st (char-string-quote? ch st))
-            (put-text-property buf mark-start pos1 'face font-lock-string-face)
+            (put-text-property buf mark-start pos1 'face category-string)
             (set! state 'normal) (loop pos1)]
            [else (loop pos1)])]
 
@@ -240,24 +190,24 @@
                (define delim-end (skip-n gb pos (string-length current-delim)))
                (cond
                  [(>= delim-end len)
-                  (put-text-property buf mark-start delim-end 'face font-lock-comment-face)
+                  (put-text-property buf mark-start delim-end 'face category-comment)
                   (set! state 'normal) (loop delim-end)]
                  [(char=? (char-at gb delim-end) #\newline)
-                  (put-text-property buf mark-start (add1 delim-end) 'face font-lock-comment-face)
+                  (put-text-property buf mark-start (add1 delim-end) 'face category-comment)
                   (set! state 'normal) (loop (add1 delim-end))]
                  [else
-                  (put-text-property buf pos pos1 'face font-lock-comment-face)
+                  (put-text-property buf pos pos1 'face category-comment)
                   (loop pos1)])]
               [else
                ;; Apply face incrementally — covers partial regions
                ;; when the closing delimiter is outside the fontify range.
-               (put-text-property buf pos pos1 'face font-lock-comment-face)
+               (put-text-property buf pos pos1 'face category-comment)
                (loop pos1)])]
            [(match-str-at gb pos len end-str)
             (set! depth (sub1 depth))
             (define pos2 (skip-n gb pos (string-length end-str)))
             (when (zero? depth)
-              (put-text-property buf mark-start pos2 'face font-lock-comment-face)
+              (put-text-property buf mark-start pos2 'face category-comment)
               (set! state 'normal))
             (loop pos2)]
            [(and (multi-char-rule-nestable? current-rule)
@@ -310,7 +260,7 @@
     ;; ── Compute starting depth at `beg` by scanning from buffer start ──
     ;;     IMPORTANT: do NOT skip faced brackets here!  When re-fontifying
     ;;     after an edit, positions [0, beg) may still have face properties
-    ;;     from the previous pass (e.g. font-lock-paren-face-N on brackets).
+    ;;     from the previous pass (e.g. paren-depth-N on brackets).
     ;;     Those brackets are REAL brackets, not string/comment brackets,
     ;;     and must be counted for correct depth.
     (define start-depth
