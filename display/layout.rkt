@@ -43,28 +43,34 @@
 (define (truncate-lines gb start-pos max-rows max-cols left-col)
   (define len (gap-length gb))
   (define (nl? b) (= b #x0A))
-  (let loop ([buf-pos start-pos] [row 0] [acc '()])
-    (if (or (>= row max-rows) (>= buf-pos len))
-        (reverse acc)
-        (let* ([line-end    (gap-scan-byte gb buf-pos 'forward nl?)]
-               [line-limit  (if (< line-end len) line-end len)]
-               [full-width  (gap-display-width gb buf-pos line-limit)]
-               [trunc?      (> full-width (+ left-col max-cols))]
-               [reserve-$   (if trunc? 1 0)]
-               [seg-start   (if (> left-col 0)
-                                (scan-display-width gb buf-pos line-limit left-col)
-                                buf-pos)]
-               [actual-left (gap-display-width gb buf-pos seg-start)]
-               [extra-cols  (- left-col actual-left)]
-               [cols-left   (max 1 (- max-cols reserve-$ extra-cols))]
-               [seg-end     (min line-limit
-                                 (scan-display-width gb seg-start line-limit cols-left))]
-               [content     (gap-substring gb seg-start seg-end)]
-               [display-len (for/sum ([ch (in-string content)])
-                              (max 0 (char-display-width ch)))])
-          (loop (if (< line-end len) (add1 line-end) len)
-                (add1 row)
-                (cons (visual-line seg-start content #f trunc? display-len) acc))))))
+  (define lines
+    (let loop ([buf-pos start-pos] [row 0] [acc '()])
+      (if (or (>= row max-rows) (>= buf-pos len))
+          (reverse acc)
+          (let* ([line-end    (gap-scan-byte gb buf-pos 'forward nl?)]
+                 [line-limit  (if (< line-end len) line-end len)]
+                 [full-width  (gap-display-width gb buf-pos line-limit)]
+                 [trunc?      (> full-width (+ left-col max-cols))]
+                 [reserve-$   (if trunc? 1 0)]
+                 [seg-start   (if (> left-col 0)
+                                  (scan-display-width gb buf-pos line-limit left-col)
+                                  buf-pos)]
+                 [actual-left (gap-display-width gb buf-pos seg-start)]
+                 [extra-cols  (- left-col actual-left)]
+                 [cols-left   (max 1 (- max-cols reserve-$ extra-cols))]
+                 [seg-end     (min line-limit
+                                   (scan-display-width gb seg-start line-limit cols-left))]
+                 [content     (gap-substring gb seg-start seg-end)]
+                 [display-len (for/sum ([ch (in-string content)])
+                                (max 0 (char-display-width ch)))])
+            (loop (if (< line-end len) (add1 line-end) len)
+                  (add1 row)
+                  (cons (visual-line seg-start content #f trunc? display-len) acc))))))
+  ;; If buffer ends with newline and we have room, add an empty visual line
+  (if (and (< (length lines) max-rows) (> len 0)
+           (= (gap-byte-ref gb (sub1 len)) #x0A))
+      (append lines (list (visual-line len "" #f #f 0)))
+      lines))
 
 ;; ============================================================
 ;; wrap-lines — split logical lines at max-cols

@@ -66,10 +66,13 @@
           (values cr cc))))
   (if c-row
       (values c-row c-col)
+      ;; Cursor past visible content: place at end of last visible line
       (let ([rev-lines (reverse vlines)])
         (if (null? rev-lines)
             (values 0 0)
-            (values (sub1 (length vlines)) 0)))))
+            (let ([last-vl (car rev-lines)])
+              (values (sub1 (length vlines))
+                      (visual-line-display-len last-vl)))))))
 
 ;; ============================================================
 ;; render-window!
