@@ -16,6 +16,7 @@
          "platform/event.rkt"
          "display/render.rkt"
          "display/window.rkt"
+         "display/char-width.rkt"
          "display/registry.rkt"
          "display/face.rkt")
 
@@ -61,59 +62,66 @@
 (define (beginning-of-line buf)
   (define gb (text-gap (buffer-text buf)))
   (define pt (buffer-point buf))
-  (define prev
-    (let loop ([p pt])
-      (if (<= p 0) 0
-          (let ([pp (gap-prev-char-pos gb p)])
-            (if (char=? (gap-char gb pp) #\newline)
-                (gap-next-char-pos gb pp)
-                (loop pp))))))
-  (set-buffer-point! buf prev))
+  (set-buffer-point! buf (line-beginning gb pt)))
 
 (define (end-of-line buf)
   (define gb (text-gap (buffer-text buf)))
   (define pt (buffer-point buf))
   (define len (buffer-length buf))
-  (define next
-    (let loop ([p pt])
-      (cond [(>= p len) len]
-            [(char=? (gap-char gb p) #\newline) p]
-            [else (loop (gap-next-char-pos gb p))])))
-  (set-buffer-point! buf next))
+  (set-buffer-point! buf (line-end gb pt len)))
 
 (define (prev-line buf)
   (define gb (text-gap (buffer-text buf)))
   (define pt (buffer-point buf))
-  (define bol
-    (let loop ([p pt])
-      (if (<= p 0) 0
-          (let ([pp (gap-prev-char-pos gb p)])
-            (if (char=? (gap-char gb pp) #\newline)
-                (gap-next-char-pos gb pp)
-                (loop pp))))))
+  ;; Record goal column
+  (define goal-col (current-display-column buf pt))
+  ;; Find bol of current line
+  (define bol (line-beginning gb pt))
   (if (> bol 0)
       (let* ([prev-end (gap-prev-char-pos gb bol)]
-             [prev-bol
-              (let loop ([p prev-end])
-                (if (<= p 0) 0
-                    (let ([pp (gap-prev-char-pos gb p)])
-                      (if (char=? (gap-char gb pp) #\newline)
-                          (gap-next-char-pos gb pp)
-                          (loop pp)))))])
-        (set-buffer-point! buf prev-bol))
+             [prev-bol (line-beginning gb prev-end)])
+        (set-buffer-point! buf (move-to-display-column gb prev-bol goal-col)))
       (set-buffer-point! buf 0)))
 
 (define (next-line buf)
   (define gb (text-gap (buffer-text buf)))
   (define pt (buffer-point buf))
   (define len (buffer-length buf))
-  (define eol
-    (let loop ([p pt])
-      (cond [(>= p len) len]
-            [(char=? (gap-char gb p) #\newline) p]
-            [else (loop (gap-next-char-pos gb p))])))
+  ;; Record goal column
+  (define goal-col (current-display-column buf pt))
+  ;; Find eol of current line
+  (define eol (line-end gb pt len))
   (when (< eol len)
-    (set-buffer-point! buf (gap-next-char-pos gb eol))))
+    (define next-bol (gap-next-char-pos gb eol))
+    (set-buffer-point! buf (move-to-display-column gb next-bol goal-col))))
+
+;; ============================================================
+;; Line / column helpers
+;; ============================================================
+
+(define (line-beginning gb pos)
+  (let loop ([p pos])
+    (if (<= p 0) 0
+        (let ([pp (gap-prev-char-pos gb p)])
+          (if (char=? (gap-char gb pp) #\newline)
+              (gap-next-char-pos gb pp)
+              (loop pp))))))
+
+(define (line-end gb pos len)
+  (let loop ([p pos])
+    (cond [(>= p len) len]
+          [(char=? (gap-char gb p) #\newline) p]
+          [else (loop (gap-next-char-pos gb p))])))
+
+(define (current-display-column buf pos)
+  (define gb (text-gap (buffer-text buf)))
+  (define bol (line-beginning gb pos))
+  (gap-display-width gb bol pos))
+
+(define (move-to-display-column gb bol target-col)
+  (define len (gap-length gb))
+  (define eol (line-end gb bol len))
+  (scan-display-width gb bol eol target-col))
 
 ;; ============================================================
 ;; Editing commands
