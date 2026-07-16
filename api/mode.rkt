@@ -60,7 +60,7 @@
 (define (compose-keymaps kms)
   (define result (make-keymap))
   (for ([km (in-list kms)])
-    (for ([(k v) (in-hash km)])
+    (for ([(k v) (in-hash (keymap-hash km))])
       (keymap-set! result k v)))
   result)
 

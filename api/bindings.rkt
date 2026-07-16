@@ -39,5 +39,16 @@
   ;; Undo/Redo
   (keymap-set! global-keymap (key 'ctrl #\_)          cmd-undo)
   (keymap-set! global-keymap (key 'ctrl #\r)          cmd-redo)
-  ;; Window
-  (keymap-set! global-keymap (key 'ctrl #\x)          cmd-other-window))
+
+  ;; ── C-x prefix keymap ──
+  (define ctrl-x-map (make-keymap))
+  (keymap-set! ctrl-x-map (key 'char #\o)       cmd-other-window)
+  (keymap-set! ctrl-x-map (key 'char #\2)       cmd-split-window-below)
+  (keymap-set! ctrl-x-map (key 'char #\3)       cmd-split-window-right)
+  (keymap-set! ctrl-x-map (key 'char #\0)       cmd-delete-window)
+  (keymap-set! ctrl-x-map (key 'char #\1)       cmd-delete-other-windows)
+  (keymap-set! ctrl-x-map (key 'char #\^)       cmd-enlarge-window)
+  (keymap-set! ctrl-x-map (key 'char #\{) cmd-shrink-window-horizontally)
+  (keymap-set! ctrl-x-map (key 'char #\}) cmd-enlarge-window-horizontally)
+  (keymap-set! ctrl-x-map (key 'char #\+)       cmd-balance-windows)
+  (keymap-set! global-keymap (key 'ctrl #\x)    ctrl-x-map))

@@ -23,7 +23,8 @@
          "api/editing.rkt"
          "api/keymap.rkt"
          "api/mode.rkt"
-         "api/bindings.rkt")
+         "api/bindings.rkt"
+         "api/display-buffer.rkt")
 
 ;; ============================================================
 ;; Welcome text
@@ -55,12 +56,13 @@
 
 (define (event-loop)
   (define evt (read-key-event!))
+  (define frm (current-frame))
 
   (cond
     ;; ── Mouse ──
     [(mouse-event? evt)
      (handle-mouse evt)
-     ((unbox render-slot) (current-frame))
+     ((unbox render-slot) frm)
      (event-loop)]
 
     ;; ── Quit: C-q ──
@@ -70,17 +72,27 @@
      (void)]
 
     [else
-     ;; ── Dispatch ──
+     ;; ── Dispatch with prefix-key support ──
      (define win (selected-window))
-     (define frm (current-frame))
      (define buf (and win (window-buffer win)))
-     (define cmd (or (and buf (lookup-key buf evt))
-                     (and (self-insert-key? evt) cmd-self-insert)))
-     (when cmd
-       ((command-fn cmd) win frm evt)
-       ;; Commit buffer undo boundary after modifying commands
-       (when (command-modifies? cmd)
-         (recorder-commit! (buffer-undo-recorder (window-buffer win)))))
+     (define initial (or (and buf (lookup-key buf evt))
+                         (and (self-insert-key? evt) cmd-self-insert)))
+     (cond
+       [(keymap-value-keymap? initial)
+        ;; Prefix key — read next key from this sub-keymap
+        (define evt2 (read-key-event!))
+        (define cmd (or (and buf (keymap-lookup initial (key-event->key evt2)))
+                        (and (self-insert-key? evt2) cmd-self-insert)))
+        (when (and cmd (command? cmd))
+          ((command-fn cmd) win frm evt2)
+          (when (command-modifies? cmd)
+            (recorder-commit! (buffer-undo-recorder (window-buffer win)))))]
+       [(command? initial)
+        (when initial
+          ((command-fn initial) win frm evt)
+          (when (command-modifies? initial)
+            (recorder-commit! (buffer-undo-recorder (window-buffer win)))))]
+       [else (void)])
      ((unbox render-slot) frm)
      (event-loop)]))
 
@@ -124,21 +136,17 @@
     (init-global-keymap!)
 
     ;; Register modes (pattern → keymap)
-    ;; Racket mode: ".rkt" files get local overrides
     (define racket-km (make-keymap))
-    ;; Example override — C-t switches to racket-specific behavior
-    ;; (actual racket mode would have more bindings)
     (register-mode! (editor-mode 'racket racket-km ".rkt"))
 
     (define main-buf (get-buffer-create "*scratch*"))
     (buffer-insert! main-buf welcome-text 0)
     (set-buffer-point! main-buf 0)
-    (set-buffer main-buf)
-    (register-buffer! main-buf)
     ;; Give scratch buffer a racket filename so racket mode applies
     (init-buffer-with-filename! main-buf "*scratch*.rkt")
 
-    (void (init-root-frame main-buf (terminal-width) (terminal-height)))
+    ;; Use display-buffer for initial window (creates frame if needed)
+    (display-buffer main-buf #:action display-buffer-same-window)
     ((unbox render-slot) (current-frame))
 
     (with-handlers ([exn:break? (λ (e) (void))])

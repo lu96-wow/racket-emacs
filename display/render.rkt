@@ -23,7 +23,7 @@
          "mouse.rkt")
 
 (provide
- display-frame display-buffer
+ display-frame
  check-min-size! render-slot
  update-frame-size!
  invalidate-frame-cache!

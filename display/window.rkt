@@ -20,6 +20,8 @@
  set-window-top! set-window-left! set-window-rows! set-window-cols!
  set-window-start! set-window-pointm!
  set-window-selected?!
+ window-desired-ratio set-window-desired-ratio!
+ window-params set-window-params!
 
  ;; frame
  frame? frame-root-window frame-selected-window
@@ -37,8 +39,11 @@
  init-root-frame
 
  ;; layout
- layout-frame!
+ layout-frame! split-window! delete-window!
  window-desired-rows set-window-desired-rows!
+
+ ;; utility
+ other-visible-window balance-windows!
 
  ;; point
  window-point set-window-point!)
@@ -51,7 +56,9 @@
   ([parent #:mutable] [children #:mutable] [horizontal? #:mutable]
    [top #:mutable] [left #:mutable] [rows #:mutable] [cols #:mutable]
    [buffer #:mutable] [start #:mutable] [pointm #:mutable] [hscroll #:mutable]
-   [selected? #:mutable])
+   [selected? #:mutable]
+   [desired-ratio #:mutable]  ; #f = equal share, number = fraction of parent
+   [params #:mutable])         ; hasheq — user key-value store
   #:transparent)
 
 ;; ============================================================
@@ -91,10 +98,99 @@
   (define start-m (text-marker! tx 0 #f))
   ;; Use buffer's point marker; set initial position to buffer point
   (define pt-m (buffer-point-marker buf))
-  (window #f '() #f 0 0 0 0 buf start-m pt-m 0 #f))
+  (window #f '() #f 0 0 0 0 buf start-m pt-m 0 #f #f (make-hasheq)))
 
 (define (make-internal-window horizontal?)
-  (window #f '() horizontal? 0 0 0 0 #f #f #f 0 #f))
+  (window #f '() horizontal? 0 0 0 0 #f #f #f 0 #f #f (make-hasheq)))
+;; ============================================================
+;; ============================================================
+;; Window tree operations
+;; ============================================================
+
+;; split-window! — split an existing leaf window, returning the new window
+;; horizontal? = #f → vertical split (new window below)
+;; horizontal? = #t → horizontal split (new window to the right)
+(define (split-window! w buf horizontal?)
+  (unless (window-leaf? w)
+    (error 'split-window! "can only split a leaf window"))
+  (define new-win (make-leaf-window buf))
+  (define internal (make-internal-window horizontal?))
+  (set-window-children! internal (list w new-win))
+  (define parent (window-parent w))
+  (define siblings (and parent (window-children parent)))
+  (if parent
+      (let ([idx (index-of siblings w)])
+        (set-window-children! parent (list-update siblings idx internal))
+        (set-window-parent! internal parent)
+        (set-window-parent! w internal)
+        (set-window-parent! new-win internal))
+      ;; w is the root — replace frame root
+      (begin
+        (set-frame-root-window! (current-frame) internal)
+        (set-window-parent! w internal)
+        (set-window-parent! new-win internal)))
+  (layout-frame! (current-frame))
+  new-win)
+
+;; delete-window! — delete a window, giving its space to siblings
+(define (delete-window! w [frm (current-frame)])
+  (define parent (window-parent w))
+  (unless parent (error 'delete-window! "cannot delete sole window"))
+  (define siblings (window-children parent))
+  (define remaining (remq w siblings))
+  (cond [(null? remaining)
+         (error 'delete-window! "internal error: no siblings")]
+        [(null? (cdr remaining))
+         ;; Only one sibling left — collapse the internal node
+         (define only-sib (car remaining))
+         (define grandparent (window-parent parent))
+         (if grandparent
+             (let* ([gp-children (window-children grandparent)]
+                    [p-idx (index-of gp-children parent)])
+               (set-window-children! grandparent
+                 (list-update gp-children p-idx only-sib))
+               (set-window-parent! only-sib grandparent))
+             ;; parent was root — promote only-sib to root
+             (begin
+               (set-frame-root-window! frm only-sib)
+               (set-window-parent! only-sib #f)))]
+        [else
+         ;; More than one sibling — just remove w
+         (set-window-children! parent remaining)])
+  (layout-frame! frm))
+
+;; other-visible-window — return any visible window other than the selected one
+(define (other-visible-window [frm (current-frame)])
+  (define sel (selected-window))
+  (for/or ([w (in-list (frame-window-list frm))])
+    (and (not (eq? w sel)) w)))
+
+;; balance-windows! — reset all desired-ratio to #f (equal splits)
+(define (balance-windows! [frm (current-frame)])
+  (let dfs ([w (frame-root-window frm)])
+    (when w
+      (cond [(null? (window-children w))
+             (set-window-desired-ratio! w #f)]
+            [else
+             (set-window-desired-ratio! w #f)
+             (for ([child (in-list (window-children w))])
+               (set-window-desired-ratio! child #f)
+               (dfs child))])))
+  (layout-frame! frm))
+
+;; ============================================================
+;; Helpers
+;; ============================================================
+
+(define (index-of lst item)
+  (let loop ([xs lst] [i 0])
+    (cond [(null? xs) #f]
+          [(eq? (car xs) item) i]
+          [else (loop (cdr xs) (add1 i))])))
+
+(define (list-update lst idx new)
+  (append (take lst idx) (list new) (drop lst (add1 idx))))
+
 ;; ============================================================
 ;; Point — get/set point for a window via its buffer's marker
 ;; ============================================================
@@ -132,14 +228,55 @@
 (define (layout-subtree! w top left rows cols)
   (set-window-top! w top) (set-window-left! w left)
   (set-window-rows! w rows) (set-window-cols! w cols)
-  (unless (null? (window-children w))
-    (define child-count (length (window-children w)))
+  (define children (window-children w))
+  (unless (null? children)
+    (define ratios (compute-ratios children))
     (if (window-horizontal? w)
-        (let loop ([children (window-children w)] [l left])
-          (unless (null? children)
-            (define child (car children)) (define child-cols (quotient cols child-count))
-            (layout-subtree! child top l rows child-cols) (loop (cdr children) (+ l child-cols))))
-        (let loop ([children (window-children w)] [t top])
-          (unless (null? children)
-            (define child (car children)) (define child-rows (quotient rows child-count))
-            (layout-subtree! child t left child-rows cols) (loop (cdr children) (+ t child-rows)))))))
+        (let loop ([cs children] [rs ratios] [l left])
+          (unless (null? cs)
+            (let* ([child-cols (max 1 (exact-round (* cols (car rs))))]
+                   [remaining-cols (- cols child-cols)]
+                   [rest-ratio-sum (- 1.0 (car rs))])
+              ;; Re-normalize remaining ratios for remaining children
+              (define norm-rest (if (> (length (cdr cs)) 0)
+                                   (map (λ (r) (if (> rest-ratio-sum 0)
+                                                    (/ r rest-ratio-sum)
+                                                    (/ 1.0 (length (cdr cs)))))
+                                        (cdr rs))
+                                   '()))
+              (layout-subtree! (car cs) top l rows child-cols)
+              (loop (cdr cs) norm-rest (+ l child-cols)))))
+        (let loop ([cs children] [rs ratios] [t top])
+          (unless (null? cs)
+            (let* ([child-rows (max 1 (exact-round (* rows (car rs))))]
+                   [remaining-rows (- rows child-rows)]
+                   [rest-ratio-sum (- 1.0 (car rs))])
+              (define norm-rest (if (> (length (cdr cs)) 0)
+                                   (map (λ (r) (if (> rest-ratio-sum 0)
+                                                    (/ r rest-ratio-sum)
+                                                    (/ 1.0 (length (cdr cs)))))
+                                        (cdr rs))
+                                   '()))
+              (layout-subtree! (car cs) t left child-rows cols)
+              (loop (cdr cs) norm-rest (+ t child-rows))))))))
+
+;; compute-ratios — resolve desired-ratio → normalized fractions
+(define (compute-ratios children)
+  (define explicit
+    (for/list ([c (in-list children)])
+      (window-desired-ratio c)))
+  (define sum-explicit (for/sum ([r (in-list explicit)] #:when r) r))
+  (cond
+    ;; All explicit, sum to 1.0 — use as-is
+    [(and (> sum-explicit 0) (andmap values explicit) (<= (abs (- sum-explicit 1.0)) 0.001))
+     explicit]
+    ;; Partial explicit — remaining children share rest equally
+    [(> sum-explicit 0)
+     (define unspecified-count (count (λ (r) (not r)) explicit))
+     (define rest (/ (- 1.0 sum-explicit) unspecified-count))
+     (for/list ([r (in-list explicit)])
+       (or r rest))]
+    ;; No explicit ratios — equal split
+    [else
+     (define n (length children))
+     (for/list ([c (in-list children)]) (/ 1.0 n))]))
