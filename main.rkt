@@ -56,34 +56,33 @@
 (define (event-loop)
   (define evt (read-key-event!))
 
-  ;; ── Mouse events — handle and continue ──
-  (when (mouse-event? evt)
-    (handle-mouse evt)
-    ((unbox render-slot) (current-frame))
-    (event-loop))
+  (cond
+    ;; ── Mouse events ──
+    [(mouse-event? evt)
+     (handle-mouse evt)
+     ((unbox render-slot) (current-frame))
+     (event-loop)]
 
-  ;; ── Quit ──
-  (when (and (key-event? evt)
-             (key-event-ctrl? evt) (key-event-char evt)
-             (char=? (char-downcase (key-event-char evt)) #\q))
-    (void))  ;; terminate — don't recurse
+    ;; ── Quit: C-q ──
+    [(and (key-event? evt)
+          (key-event-ctrl? evt) (key-event-char evt)
+          (char=? (char-downcase (key-event-char evt)) #\q))
+     (void)]  ;; tail position → terminate
 
-  ;; ── Dispatch key to command ──
-  (define cmd (or (lookup-command default-bindings evt)
-                  (and (self-insert-key? evt) cmd-self-insert)))
-  (define win (selected-window))
-  (define frm (current-frame))
-
-  (when cmd
-    ;; Execute command (buffer-insert!/delete! internally record undo)
-    ((command-fn cmd) win frm evt)
-    ;; Commit undo group if command modified buffer
-    (when (command-modifies? cmd)
-      (recorder-commit! (buffer-undo-recorder (window-buffer win)))))
-
-  ;; 4. Always redraw (navigation needs cursor update)
-  ((unbox render-slot) frm)
-  (event-loop))
+    [else
+     ;; ── Dispatch key to command ──
+     (define cmd (or (lookup-command default-bindings evt)
+                     (and (self-insert-key? evt) cmd-self-insert)))
+     (define win (selected-window))
+     (define frm (current-frame))
+     (when cmd
+       (define state (and (command-state-fn cmd)
+                          ((command-state-fn cmd) win frm)))
+       ((command-fn cmd) win frm evt)
+       (when (command-undo-fn cmd)
+         (command-history-push! cmd state)))
+     ((unbox render-slot) frm)
+     (event-loop)]))
 
 ;; ============================================================
 ;; Mouse handler (internal to event-loop)

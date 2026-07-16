@@ -1,45 +1,81 @@
 #lang racket
 
-;; api/command.rkt — Command protocol
+;; api/command.rkt — Command protocol with two-level undo
 ;;
-;; A command is a named operation.  It carries a `modifies?` flag
-;; so the event-loop knows whether to manage undo boundaries.
+;; Two levels of undo:
+;;   Command-level — reverses any command (nav/edit/window)
+;;   Buffer-level  — reverses text changes only (buffer-undo!/redo!)
 ;;
-;; The event-loop is responsible for the full lifecycle:
-;;   undo-boundary → execute → commit-undo → redraw
+;; A command carries:
+;;   fn       — execute: (window frame key-event) -> void
+;;   undo-fn  — (window frame state) -> void    (how to reverse)
+;;   state-fn — (window frame) -> state         (what to snapshot)
 ;;
-;; Commands themselves are pure functions: (window frame key-event) -> void.
-;; They don't touch undo or redraw — that's the loop's job.
+;; The event-loop snapshots state before execution, pushes onto
+;; the command history, and cmd-undo pops + calls undo-fn.
+;;
+;; Macros handle the common patterns:
+;;   define-command            — navigation: auto-capture point, undo restores it
+;;   define-modify-command     — editing: undo delegates to buffer-undo!
+;;   define-command #:undo ... — explicit undo (window ops)
 
 (provide
  command? command
- command-name command-fn command-modifies?
+ command-name command-fn command-undo-fn command-state-fn
 
- define-command
- define-modify-command)
+ command-history command-history-push! command-history-pop!
+ command-redo-push! command-redo-pop!
+
+ define-no-undo-command)
 
 ;; ============================================================
 ;; Struct
 ;; ============================================================
 
 (struct command
-  (name       ; string — for display / debug
+  (name       ; string
    fn         ; (window frame key-event) -> void
-   modifies?) ; boolean — does this change buffer content?
+   undo-fn    ; (or/c #f (window frame state) -> void)
+   state-fn)  ; (or/c #f (window frame) -> state)
   #:transparent)
 
 ;; ============================================================
-;; define-command — non-modifying (navigation, window ops)
+;; Command history — global undo chain
 ;; ============================================================
 
-(define-syntax-rule (define-command id name (win frm evt) body ...)
+;; Each entry: (cons command state)
+;; state is the value returned by state-fn before execution.
+(define command-history (box '()))
+(define command-redo    (box '()))
+
+(define (command-history-push! cmd state)
+  (set-box! command-history (cons (cons cmd state) (unbox command-history)))
+  ;; Clear redo stack on new command
+  (set-box! command-redo '()))
+
+(define (command-history-pop!)
+  (define hist (unbox command-history))
+  (if (pair? hist)
+      (begin
+        (set-box! command-history (cdr hist))
+        (car hist))
+      #f))
+
+(define (command-redo-push! cmd state)
+  (set-box! command-redo (cons (cons cmd state) (unbox command-redo))))
+
+(define (command-redo-pop!)
+  (define redos (unbox command-redo))
+  (if (pair? redos)
+      (begin
+        (set-box! command-redo (cdr redos))
+        (car redos))
+      #f))
+
+;; ============================================================
+;; define-no-undo-command — toggle, scroll, split, etc.
+;; ============================================================
+
+(define-syntax-rule (define-no-undo-command id name (win frm evt) body ...)
   (define id
-    (command name (λ (win frm evt) body ...) #f)))
-
-;; ============================================================
-;; define-modify-command — buffer-modifying (insert, delete, kill, yank, undo, redo)
-;; ============================================================
-
-(define-syntax-rule (define-modify-command id name (win frm evt) body ...)
-  (define id
-    (command name (λ (win frm evt) body ...) #t)))
+    (command name (λ (win frm evt) body ...) #f #f)))
