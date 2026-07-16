@@ -17,8 +17,8 @@
 ;; adjust-markers-insert! and adjust-markers-delete! are also
 ;; exported so they can be tested independently.
 
-(require "gap/gap.rkt"
-         "gap/marker.rkt")
+(require "gap.rkt"
+         "marker.rkt")
 
 (provide
  ;; struct + constructor

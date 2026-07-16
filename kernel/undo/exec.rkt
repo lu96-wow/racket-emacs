@@ -9,7 +9,7 @@
 ;; the buffer when undo happens).  On redo, the range is empty —
 ;; execute-redo! treats it as a no-op.
 
-(require "../text.rkt"
+(require "../data/text.rkt"
          "record.rkt")
 
 (provide

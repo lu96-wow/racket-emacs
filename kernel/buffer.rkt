@@ -1,13 +1,26 @@
 #lang racket
 
-;; kernel/buffer.rkt — Buffer: text + undo + change-tracking + point/mark
+;; kernel/buffer.rkt — Buffer: text + undo + point/mark + text-properties
 ;;
-;; Composes kernel/text.rkt, kernel/undo/*, and protocol/undo-exec.rkt
-;; into a full editor buffer.  No hooks, no display — those are
-;; orchestrated explicitly by the command loop.
+;; Composes text.rkt, textprop.rkt, undo/* into the core editor buffer.
+;;
+;; This module is pure kernel — NO display, NO dirty flags, NO rendering.
+;; The buffer knows about text mutation, undo history, point/mark.
+;;
+;; Architecture:
+;;   gap-buffer (bytes)  ←  gap.rkt
+;;   markers             ←  marker.rkt
+;;   text                ←  gap + marker list  (text.rkt)
+;;   text-properties     ←  interval-map       (textprop.rkt)
+;;   undo                ←  record/recorder/exec
+;;   buffer              ←  text + undo + point/mark + text-props
+;;
+;; All mutations return change information as values:
+;;   (values start end) — the byte range affected in the buffer.
+;;   The caller composes these freely; kernel never tracks dirty state.
 
-(require "text.rkt"
-         "textprop.rkt"
+(require "data/text.rkt"
+         "data/textprop.rkt"
          "undo/record.rkt"
          "undo/recorder.rkt"
          "undo/exec.rkt")
@@ -21,18 +34,23 @@
  buffer-read-only? buffer-saved-modiff
  set-buffer-name! set-buffer-modified?! set-buffer-modiff!
  set-buffer-filename! set-buffer-read-only?! set-buffer-saved-modiff!
- ;; mutations
+
+ ;; mutations — all return (values start end)
  buffer-insert! buffer-delete! buffer-undo! buffer-redo!
+
  ;; point
  buffer-point set-buffer-point!
+
  ;; mark / region
- set-mark! buffer-mark region-active? region-beginning region-end deactivate-mark!
+ set-mark! buffer-mark region-active? region-beginning region-end
+ deactivate-mark!
+
  ;; queries
  buffer-length buffer-substring buffer-string
- ;; change-tracking
- buffer-change-region clear-buffer-change-region!
+
  ;; text properties
- buffer-face-at)
+ buffer-face-at
+ buffer-prop-get buffer-prop-put! buffer-prop-remove!)
 
 ;; ============================================================
 ;; Struct
@@ -40,8 +58,8 @@
 
 (struct buffer
   ([name #:mutable]
-   text                 ; text? — the underlying gap+markers
-   [text-props #:mutable]  ; text-properties? — faces + other metadata
+   text                 ; text? — underlying gap+markers
+   [text-props #:mutable]  ; text-properties? — faces + metadata
    undo-recorder        ; undo-recorder? — edit history
    point-marker         ; marker? — main cursor
    [mark-marker #:mutable]  ; (or/c marker? #f) — region anchor
@@ -49,8 +67,7 @@
    [modiff #:mutable]
    [filename #:mutable]
    [read-only? #:mutable]
-   [saved-modiff #:mutable]
-   change-tracker)      ; (box/c (or/c #f (cons/c int int)))
+   [saved-modiff #:mutable])
   #:transparent)
 
 (define (make-buffer [name "*scratch*"] [initial ""] [filename #f])
@@ -58,94 +75,107 @@
   (define tp (make-text-properties))
   (define pt (text-marker! tx 0 #t)) ; insertion-type = stay after inserts
   (define rec (make-undo-recorder))
-  (define tracker (box #f))
-  (buffer name tx tp rec pt #f #f 0 filename #f 0 tracker))
+  (buffer name tx tp rec pt #f #f 0 filename #f 0))
 
 ;; ============================================================
-;; Change-tracker helpers
-;; ============================================================
-
-(define (extend-change-region! buf start end)
-  (define prev (buffer-change-region buf))
-  (define new
-    (if prev
-        (cons (min (car prev) start) (max (cdr prev) end))
-        (cons start end)))
-  (set-box! (buffer-change-tracker buf) new))
-
-(define (buffer-change-region buf)
-  (unbox (buffer-change-tracker buf)))
-
-(define (clear-buffer-change-region! buf)
-  (set-box! (buffer-change-tracker buf) #f))
-
-;; ============================================================
-;; Mutations
+;; Mutations — return (values start end) change extent
 ;; ============================================================
 
 (define (buffer-insert! buf str byte-pos)
+  ;; Returns (values byte-pos byte-pos+blen) — the inserted range.
   (when (buffer-read-only? buf)
     (error 'buffer-insert! "buffer is read-only: ~a" (buffer-name buf)))
   (define bs (string->bytes/utf-8 str))
   (define blen (bytes-length bs))
-  (when (positive? blen)
-    (define tx (buffer-text buf))
-    (text-insert! tx byte-pos bs)
-    (textprop-adjust-insert! (buffer-text-props buf) byte-pos blen)
-    (recorder-record-insert! (buffer-undo-recorder buf) byte-pos
-                             (+ byte-pos blen))
-    (mark-modified! buf byte-pos (+ byte-pos blen))))
+  (if (positive? blen)
+      (begin
+        (text-insert! (buffer-text buf) byte-pos bs)
+        (textprop-adjust-insert! (buffer-text-props buf) byte-pos blen)
+        (recorder-record-insert! (buffer-undo-recorder buf) byte-pos
+                                 (+ byte-pos blen))
+        (set-buffer-modified?! buf #t)
+        (set-buffer-modiff! buf (add1 (buffer-modiff buf)))
+        (values byte-pos (+ byte-pos blen)))
+      ;; No change
+      (values byte-pos byte-pos)))
 
 (define (buffer-delete! buf from to)
+  ;; Returns (values from from) — position of the deletion.
   (when (buffer-read-only? buf)
     (error 'buffer-delete! "buffer is read-only: ~a" (buffer-name buf)))
-  (define text-str (buffer-substring buf from to))
-  (text-delete! (buffer-text buf) from to)
-  (textprop-adjust-delete! (buffer-text-props buf) from to)
-  (recorder-record-delete! (buffer-undo-recorder buf) text-str from)
-  (mark-modified! buf from from))
-
-(define (mark-modified! buf start end)
-  (set-buffer-modified?! buf #t)
-  (set-buffer-modiff! buf (add1 (buffer-modiff buf)))
-  (extend-change-region! buf start end))
+  (if (< from to)
+      (let ([text-str (buffer-substring buf from to)])
+        (text-delete! (buffer-text buf) from to)
+        (textprop-adjust-delete! (buffer-text-props buf) from to)
+        (recorder-record-delete! (buffer-undo-recorder buf) text-str from)
+        (set-buffer-modified?! buf #t)
+        (set-buffer-modiff! buf (add1 (buffer-modiff buf)))
+        (values from from))
+      ;; No change
+      (values from from)))
 
 ;; ============================================================
-;; Undo / Redo
+;; Undo / Redo — return (values start end) or (values #f #f)
 ;; ============================================================
 
 (define (buffer-undo! buf)
+  ;; Returns (values start end) of the undone change, or (values #f #f).
   (define rec (buffer-undo-recorder buf))
-  (or (and (pair? (undo-recorder-undo-stack rec))
-           (let* ([group (car (undo-recorder-undo-stack rec))]
-                  [tx (buffer-text buf)])
-             (set-undo-recorder-undo-stack! rec
-               (cdr (undo-recorder-undo-stack rec)))
-             (execute-undo! tx group)
-             ;; Restore point to beginning of affected range
-             (restore-point-after-undo! buf group)
-             (set-undo-recorder-redo-stack! rec
-               (cons group (undo-recorder-redo-stack rec)))
-             #t))
-      #f))
+  (and (pair? (undo-recorder-undo-stack rec))
+       (let* ([group (car (undo-recorder-undo-stack rec))]
+              [tx (buffer-text buf)]
+              [range (undo-group-range group)])
+         (set-undo-recorder-undo-stack! rec
+           (cdr (undo-recorder-undo-stack rec)))
+         (execute-undo! tx group)
+         (restore-point-after-undo! buf group)
+         (set-undo-recorder-redo-stack! rec
+           (cons group (undo-recorder-redo-stack rec)))
+         (set-buffer-modified?! buf #t)
+         (set-buffer-modiff! buf (add1 (buffer-modiff buf)))
+         (values (car range) (cdr range)))))
 
 (define (buffer-redo! buf)
+  ;; Returns (values start end) of the redone change, or (values #f #f).
   (define rec (buffer-undo-recorder buf))
-  (or (and (pair? (undo-recorder-redo-stack rec))
-           (let* ([group (car (undo-recorder-redo-stack rec))]
-                  [tx (buffer-text buf)])
-             (set-undo-recorder-redo-stack! rec
-               (cdr (undo-recorder-redo-stack rec)))
-             (execute-redo! tx group)
-             (set-undo-recorder-undo-stack! rec
-               (cons group (undo-recorder-undo-stack rec)))
-             #t))
-      #f))
+  (and (pair? (undo-recorder-redo-stack rec))
+       (let* ([group (car (undo-recorder-redo-stack rec))]
+              [tx (buffer-text buf)]
+              [range (undo-group-range group)])
+         (set-undo-recorder-redo-stack! rec
+           (cdr (undo-recorder-redo-stack rec)))
+         (execute-redo! tx group)
+         (set-undo-recorder-undo-stack! rec
+           (cons group (undo-recorder-undo-stack rec)))
+         (set-buffer-modified?! buf #t)
+         (set-buffer-modiff! buf (add1 (buffer-modiff buf)))
+         (values (car range) (cdr range)))))
+
+;; ============================================================
+;; undo-group-range — compute the byte range affected by a group
+;; ============================================================
+
+(define (undo-group-range group)
+  ;; Returns (cons start end).  For use as return value of undo/redo.
+  (define records (undo-group-records group))
+  (if (null? records)
+      (cons 0 0)
+      (let loop ([rs records] [mn +inf.0] [mx -inf.0])
+        (if (null? rs)
+            (cons (if (= mn +inf.0) 0 mn) (if (= mx -inf.0) 0 mx))
+            (let ([r (car rs)])
+              (cond [(undo-insert? r)
+                     (loop (cdr rs)
+                           (min mn (undo-insert-beg r))
+                           (max mx (undo-insert-end r)))]
+                    [(undo-delete? r)
+                     (define blen (bytes-length
+                                   (string->bytes/utf-8 (undo-delete-text r))))
+                     (loop (cdr rs)
+                           (min mn (undo-delete-beg r))
+                           (max mx (+ (undo-delete-beg r) blen)))]))))))
 
 (define (restore-point-after-undo! buf group)
-  ;; Place point at the end of the restored range.
-  ;; For undo-delete: after the re-inserted text.
-  ;; For undo-insert: at the beginning (where text was removed).
   (define records (undo-group-records group))
   (when (pair? records)
     (define first (car records))
@@ -200,13 +230,6 @@
   (set-buffer-mark-marker! buf #f))
 
 ;; ============================================================
-;; Text properties — convenience accessor
-;; ============================================================
-
-(define (buffer-face-at buf pos)
-  (textprop-face-at (buffer-text-props buf) pos))
-
-;; ============================================================
 ;; Queries
 ;; ============================================================
 
@@ -222,3 +245,83 @@
 
 (define (buffer-string buf)
   (buffer-substring buf 0 (buffer-length buf)))
+
+;; ============================================================
+;; Text properties
+;; ============================================================
+
+(define (buffer-face-at buf pos)
+  (textprop-face-at (buffer-text-props buf) pos))
+
+(define (buffer-prop-get buf pos key [default #f])
+  (textprop-get (buffer-text-props buf) pos key default))
+
+(define (buffer-prop-put! buf from to key value)
+  (textprop-put! (buffer-text-props buf) from to key value))
+
+(define (buffer-prop-remove! buf from to)
+  (textprop-remove! (buffer-text-props buf) from to))
+
+;; ============================================================
+;; Tests
+;; ============================================================
+
+(module+ test
+  (require rackunit)
+
+  (let ([b (make-buffer "test" "hello world")])
+    (check-equal? (buffer-length b) 11)
+    (check-equal? (buffer-substring b 0 5) "hello")
+    (check-equal? (buffer-point b) 0)
+    (check-false (buffer-modified? b)))
+
+  (test-case "insert returns change extent"
+    (let ([b (make-buffer "test" "abc")])
+      (let-values ([(start end) (buffer-insert! b "XY" 1)])
+        (check-equal? start 1 "insert start")
+        (check-equal? end 3 "insert end")
+        (check-equal? (buffer-string b) "aXYbc"))))
+
+  (test-case "delete returns change extent"
+    (let ([b (make-buffer "test" "abc")])
+      (let-values ([(start end) (buffer-delete! b 1 2)])
+        (check-equal? start 1 "delete start")
+        (check-equal? end 1 "delete end (shrunk to point)")
+        (check-equal? (buffer-string b) "ac"))))
+
+  (test-case "no-op returns nil extent"
+    (let ([b (make-buffer "test" "abc")])
+      (let-values ([(start end) (buffer-insert! b "" 1)])
+        (check-equal? start 1)
+        (check-equal? end 1))
+      (let-values ([(start end) (buffer-delete! b 1 1)])
+        (check-equal? start 1)
+        (check-equal? end 1))))
+
+  (test-case "region"
+    (let ([b (make-buffer "test" "hello world")])
+      (set-buffer-point! b 5)
+      (set-mark! b)
+      (set-buffer-point! b 10)
+      (check-true (region-active? b))
+      (check-equal? (region-beginning b) 5)
+      (check-equal? (region-end b) 10)))
+
+  (test-case "undo/redo return change extent"
+    (let ([b (make-buffer "test" "hello\nworld\n")])
+      (let-values ([(s e) (buffer-insert! b "X" 6)])
+        (check-equal? (buffer-string b) "hello\nXworld\n")
+        (check-equal? s 6)
+        (check-equal? e 7))
+      (recorder-commit! (buffer-undo-recorder b))
+      ;; undo returns range of undone change
+      (let-values ([(s e) (buffer-undo! b)])
+        (check-equal? (buffer-string b) "hello\nworld\n")
+        (check-equal? s 6 "undo start should be insert pos")
+        (check-equal? e 7 "undo end should be insert end"))
+      ;; redo returns range of redone change
+      (let-values ([(s e) (buffer-redo! b)])
+        (check-equal? (buffer-string b) "hello\nXworld\n")
+        (check-equal? s 6)
+        (check-equal? e 7))))
+)
