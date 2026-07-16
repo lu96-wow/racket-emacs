@@ -24,7 +24,7 @@
  ;; position mapping
  pos->row-col
 
- ;; per-buffer state (wrap mode, hscroll, current-buffer)
+ ;; per-buffer state (wrap mode, hscroll)
  buffer-wrap-mode set-buffer-wrap-mode!
  buffer-hscroll set-buffer-hscroll!
  truncate-lines?)
@@ -134,11 +134,8 @@
 
 (define (buffer-wrap-mode buf) (hash-ref wrap-mode-table buf 'none))
 (define (set-buffer-wrap-mode! buf m) (hash-set! wrap-mode-table buf m))
-(define (truncate-lines? [buf (current-buffer)])
+(define (truncate-lines? buf)
   (eq? (buffer-wrap-mode buf) 'none))
 
 (define (buffer-hscroll buf) (hash-ref hscroll-table buf 0))
 (define (set-buffer-hscroll! buf n) (hash-set! hscroll-table buf (max 0 n)))
-
-(define current-buffer (make-parameter #f))
-(define (set-buffer buf) (current-buffer buf) buf)

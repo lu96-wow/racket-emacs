@@ -161,39 +161,64 @@
           (if (< nl 0) 0
               (if (zero? remaining) (add1 nl) (loop nl (sub1 remaining))))))))
 
-(define (recenter-point! lf rect selected?)
-  (define buf (leaf-buffer lf))
-  (define tx (buffer-text buf))
-  (define gb (text-gap tx))
+;; ============================================================
+;; Scroll: pure calc + separate apply
+;; ============================================================
+
+;; calc-scroll — pure: compute new start-pos and hscroll
+;; Returns (values start-pos hscroll) where #f means "no change"
+(define (calc-scroll gb pt-pos start-pos rows cols hscroll selected? trunc?)
   (define len (gap-length gb))
-  (define pt (if selected? (buffer-point buf) (leaf-point lf)))
-  (define ws (text-marker-pos tx (leaf-start lf)))
-  (define rows (max 1 (rect-rows rect)))
-  (define cols (rect-cols rect))
+  ;; Vertical: last visible buffer position
   (define last-buf-pos
-    (if (truncate-lines? buf)
-        (end-of-physical-lines gb ws rows)
-        (let ([vlines (visual-line-lines gb ws rows cols #:wrap-mode 'char #:left-col 0)])
-          (if (null? vlines) ws
+    (if trunc?
+        (end-of-physical-lines gb start-pos rows)
+        (let ([vlines (visual-line-lines gb start-pos rows cols
+                                         #:wrap-mode 'char #:left-col 0)])
+          (if (null? vlines) start-pos
               (let* ([lv (last vlines)])
                 (+ (visual-line-buf-pos lv) (string-length (visual-line-content lv))))))))
-  (cond [(< pt ws)
-         (define nl (gap-scan-byte gb pt 'backward (λ (b) (= b #x0A))))
-         (text-set-marker-pos! tx (leaf-start lf) (if (>= nl 0) (add1 nl) 0))
-         (when (> (leaf-hscroll lf) 0) (set-leaf-hscroll! lf 0))]
-        [(> pt last-buf-pos)
-         (define target-lines (max 1 (quotient (* rows 2) 3)))
-         (text-set-marker-pos! tx (leaf-start lf) (beginning-of-nth-prev-line gb pt target-lines))
-         (when (> (leaf-hscroll lf) 0) (set-leaf-hscroll! lf 0))]
-        [else (void)])
-  (when (and selected? (truncate-lines? buf))
-    (define pt-col
-      (let ([bol (gap-scan-byte gb pt 'backward (λ (b) (= b #x0A)))])
-        (gap-display-width gb (if (>= bol 0) (add1 bol) 0) pt)))
-    (define hs (leaf-hscroll lf))
-    (cond [(< pt-col hs)        (set-leaf-hscroll! lf pt-col)]
-          [(>= pt-col (+ hs cols)) (set-leaf-hscroll! lf (max 0 (- pt-col cols -1)))]
-          [else (void)])))
+  ;; Vertical scroll decision
+  (define-values (v-start v-hscroll)
+    (cond [(< pt-pos start-pos)
+           (define nl (gap-scan-byte gb pt-pos 'backward (λ (b) (= b #x0A))))
+           (values (if (>= nl 0) (add1 nl) 0)
+                   (if (> hscroll 0) 0 #f))]
+          [(> pt-pos last-buf-pos)
+           (define target-lines (max 1 (quotient (* rows 2) 3)))
+           (values (beginning-of-nth-prev-line gb pt-pos target-lines)
+                   (if (> hscroll 0) 0 #f))]
+          [else (values #f #f)]))
+  ;; Horizontal scroll decision (only for selected windows in truncate mode)
+  (define h-new
+    (if (and selected? trunc?)
+        (let* ([bol (gap-scan-byte gb pt-pos 'backward (λ (b) (= b #x0A)))]
+               [pt-col (gap-display-width gb (if (>= bol 0) (add1 bol) 0) pt-pos)]
+               [hs (or v-hscroll hscroll)])
+          (cond [(< pt-col hs)        pt-col]
+                [(>= pt-col (+ hs cols)) (max 0 (- pt-col cols -1))]
+                [else #f]))
+        #f))
+  (values (or v-start start-pos)
+          (or h-new v-hscroll hscroll)))
+
+;; apply-scroll! — write computed scroll to leaf
+(define (apply-scroll! lf start-pos hscroll)
+  (define tx (buffer-text (leaf-buffer lf)))
+  (text-set-marker-pos! tx (leaf-start lf) start-pos)
+  (set-leaf-hscroll! lf hscroll))
+
+;; recenter-point! — compose calc + apply
+(define (recenter-point! lf rect selected?)
+  (define buf (leaf-buffer lf))
+  (define gb (text-gap (buffer-text buf)))
+  (define pt (if selected? (buffer-point buf) (leaf-point lf)))
+  (define ws (text-marker-pos (buffer-text buf) (leaf-start lf)))
+  (define rows (max 1 (rect-rows rect)))
+  (define cols (rect-cols rect))
+  (define-values (new-start new-hscroll)
+    (calc-scroll gb pt ws rows cols (leaf-hscroll lf) selected? (truncate-lines? buf)))
+  (apply-scroll! lf new-start new-hscroll))
 
 ;; ============================================================
 ;; update-frame-size! / cache
