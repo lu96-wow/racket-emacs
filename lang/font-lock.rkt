@@ -184,7 +184,10 @@
 
   (for ([kw-entry (in-list keywords)])
     (match-define (cons rx face-name) kw-entry)
-    (define pat (if (pregexp? rx) rx (pregexp rx (if case-fold? #t #f))))
+    (define pat (cond [(pregexp? rx) rx]
+                      [(regexp? rx) rx]
+                      [(string? rx) (pregexp rx)]
+                      [else (pregexp (format "~a" rx))]))
     (let sloop ([offset 0])
       (when (< offset tlen)
         (define m (regexp-match-positions pat text offset tlen))
