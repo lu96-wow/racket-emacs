@@ -282,7 +282,7 @@
   (recorder-commit! rec)
 
   ;; Redraw via frame
-  (display-frame (current-frame))
+  ((unbox render-slot) (current-frame))
 
   ;; Continue unless quit
   (unless (and (key-event-ctrl? ke) (key-event-char ke)
@@ -314,7 +314,7 @@
 
     ;; Create frame
     (void (init-root-frame main-buf (terminal-width) (terminal-height)))
-    (display-frame (current-frame))
+    ((unbox render-slot) (current-frame))
 
     (with-handlers ([exn:break? (λ (e) (void))])
       (event-loop main-buf))

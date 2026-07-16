@@ -24,11 +24,48 @@
 
 (provide
  display-frame display-buffer
+ check-min-size! render-slot
  update-frame-size!
  invalidate-frame-cache!
  ;; re-export
  (all-from-out "layout.rkt")
  (all-from-out "mouse.rkt"))
+
+;; ============================================================
+;; Minimum window size + render slot
+;; ============================================================
+;; When the frame is too small, swap render-slot to a "window too
+;; small" warning so the hot path avoids an (if) on every frame.
+
+(define MIN-ROWS 4)
+(define MIN-COLS 15)
+
+(define render-slot (box #f))
+
+(define (render-too-small frm)
+  (detect-terminal-size!)
+  (define w (frame-width frm))
+  (define h (frame-height frm))
+  (display format-cursor-hide)
+  (define msg "window too small")
+  (define pad (max 0 (quotient (- w (string-length msg)) 2)))
+  (display format-clear-screen)
+  (when (and (>= h 1) (>= w (string-length msg)))
+    (display (format-cursor-move (quotient h 2) 0))
+    (display (make-string pad #\space))
+    (display format-reverse)
+    (display msg)
+    (display format-reset))
+  (display format-cursor-show)
+  (flush-output))
+
+(define (check-min-size! render-slot frm)
+  (define w (frame-width frm))
+  (define h (frame-height frm))
+  (set-box! render-slot
+    (if (and (>= w MIN-COLS) (>= h MIN-ROWS))
+        display-frame
+        render-too-small)))
 
 ;; ============================================================
 ;; render-visual-lines! — fill vbuffer from visual lines + find cursor
@@ -196,7 +233,8 @@
   (when (or (not (= w (frame-width frm))) (not (= h (frame-height frm))))
     (set-frame-width! frm w)
     (set-frame-height! frm h)
-    (layout-frame! frm)))
+    (layout-frame! frm)
+    (check-min-size! render-slot frm)))
 
 ;; ============================================================
 ;; Frame cache
@@ -227,6 +265,9 @@
   (display format-cursor-show)
   (hash-set! frame-cache-table frm new-vb)
   (flush-output))
+
+;; set initial render-slot after display-frame is defined
+(set-box! render-slot display-frame)
 
 ;; ============================================================
 ;; display-buffer — convenience entry
