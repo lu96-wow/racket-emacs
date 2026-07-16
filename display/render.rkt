@@ -17,7 +17,6 @@
          "char-width.rkt"
          "face.rkt"
          "window.rkt"
-         "minibuf.rkt"
          "registry.rkt")
 
 (provide
@@ -26,10 +25,7 @@
  recenter-point! update-frame-size!
  invalidate-frame-cache!
  screen-coord->buffer-pos
- ;; re-export minibuf setters for main
- set-bottom-line-echo! set-bottom-line-doc!
- buffer-wrap-mode set-buffer-wrap-mode!
- bottom-line-doc-rows)
+ buffer-wrap-mode set-buffer-wrap-mode!)
 
 ;; ============================================================
 ;; visual-line
@@ -229,11 +225,11 @@
     (values (make-vbuffer 1 1) #f #f))
   (define tx  (buffer-text buf))
   (define gb  (text-gap tx))
-  (define start-pos (if (window-mini? w) 0 (text-marker-pos tx (window-start w))))
+  (define start-pos (if (window-start w) (text-marker-pos tx (window-start w)) 0))
   (define pt-pos    (if (window-selected? w) (buffer-point buf) (window-point w)))
-  (define content-rows (if (window-mini? w) rows (max 0 (- rows 1))))
-  (define left-col (if (window-mini? w) 0 (window-hscroll w)))
-  (define wrap-mode (if (and (not (window-mini? w)) (not (truncate-lines? buf))) 'char 'none))
+  (define content-rows (max 0 (sub1 rows)))
+  (define left-col (window-hscroll w))
+  (define wrap-mode (if (truncate-lines? buf) 'none 'char))
   (define vb (make-vbuffer rows cols))
   (define-values (c-row c-col)
     (if (> content-rows 0)
@@ -241,8 +237,7 @@
                                           #:wrap-mode wrap-mode #:left-col left-col)])
           (render-visual-lines! vb buf gb vlines pt-pos cols content-rows))
         (values #f #f)))
-  (unless (window-mini? w)
-    (render-mode-line! vb content-rows cols buf c-row c-col))
+  (render-mode-line! vb content-rows cols buf c-row c-col)
   (values vb
           (and (or force-cursor? (window-selected? w)) c-row)
           (and (or force-cursor? (window-selected? w)) c-col)))
@@ -258,15 +253,11 @@
   (define leaves (frame-window-list frm))
   (define-values (cur-row cur-col)
     (for/fold ([cr #f] [cc #f]) ([w (in-list leaves)])
-      (if (window-mini? w)
-          (let-values ([(bc bc-rows) (bottom-line-render! final-vb (window-top w) (window-cols w))])
-            (if bc (values (window-top w) (+ (window-left w) bc)) (values cr cc)))
-          (let-values ([(sub-vb sr sc) (render-window! w)])
-            (vbuffer-blit! final-vb (window-top w) (window-left w) sub-vb)
-            (if (window-selected? w)
-                (values (and sr (+ (window-top w) sr))
-                        (and sc (+ (window-left w) sc)))
-                (values cr cc))))))
+      (let-values ([(sub-vb sr sc) (render-window! w)])
+        (vbuffer-blit! final-vb (window-top w) (window-left w) sub-vb)
+        (if (and (window-selected? w) sr sc)
+            (values (+ (window-top w) sr) (+ (window-left w) sc))
+            (values cr cc)))))
   (values final-vb cur-row cur-col))
 
 ;; ============================================================
@@ -349,17 +340,7 @@
   (detect-terminal-size!)
   (init-face-cache!)
 
-  ;; Adjust minibuffer height
-  (define mini (frame-minibuffer-window frm))
-  (when mini
-    (define needed (bottom-line-doc-rows))
-    (unless (= needed (window-desired-rows mini))
-      (set-window-desired-rows! mini needed)
-      (layout-frame! frm)
-      (invalidate-frame-cache! frm)))
-
-  (define leaves (filter (λ (w) (and (window-leaf? w) (not (window-mini? w))))
-                         (frame-window-list frm)))
+  (define leaves (filter window-leaf? (frame-window-list frm)))
   ;; Recenter
   (for ([w (in-list leaves)]) (recenter-point! w))
   ;; Build desired matrix
@@ -493,7 +474,7 @@
            w)))
   (cond
     [(not hit) (values #f #f 'nothing)]
-    [(window-mini? hit) (values #f hit 'minibuffer)]
+    [(not (window-start hit)) (values #f hit 'minibuffer)]
     [(= row (+ (window-top hit) (window-rows hit) -1)) (values #f hit 'mode-line)]
     [else
      (define buf (window-buffer hit))
@@ -528,7 +509,6 @@
   (define frm (current-frame))
   (if frm
       (display-frame frm)
-      (let* ([mini-buf (get-buffer-create " *minibuf*")]
-             [frm* (init-root-frame buf mini-buf (terminal-width) (terminal-height))])
+      (let ([frm* (init-root-frame buf (terminal-width) (terminal-height))])
         (invalidate-frame-cache! frm*)
         (display-frame frm*))))

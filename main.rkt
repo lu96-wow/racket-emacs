@@ -247,7 +247,7 @@
           (char=? (char-downcase (key-event-char ke)) #\t))
      (define new-mode (if (eq? (buffer-wrap-mode buf) (quote none)) (quote char) (quote none)))
      (set-buffer-wrap-mode! buf new-mode)
-     (set-bottom-line-echo! (format "Wrap: ~a" new-mode))
+     ;; (no minibuffer yet) (void)
      (invalidate-frame-cache!)]
 
     ;; C-d: delete forward
@@ -312,11 +312,8 @@
     (set-buffer main-buf)
     (register-buffer! main-buf)
 
-    (define mini-buf (get-buffer-create " *minibuf*"))
-    (register-buffer! mini-buf)
-
     ;; Create frame
-    (void (init-root-frame main-buf mini-buf (terminal-width) (terminal-height)))
+    (void (init-root-frame main-buf (terminal-width) (terminal-height)))
     (display-frame (current-frame))
 
     (with-handlers ([exn:break? (λ (e) (void))])

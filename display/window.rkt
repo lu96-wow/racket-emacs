@@ -15,16 +15,16 @@
  window? window-parent window-children window-horizontal?
  window-top window-left window-rows window-cols
  window-hscroll set-window-hscroll!
- window-buffer set-window-buffer! window-start window-pointm window-selected? window-mini?
+ window-buffer set-window-buffer! window-start window-pointm window-selected?
  set-window-parent! set-window-children! set-window-horizontal?!
  set-window-top! set-window-left! set-window-rows! set-window-cols!
  set-window-start! set-window-pointm!
- set-window-selected?! set-window-mini?!
+ set-window-selected?!
 
  ;; frame
- frame? frame-root-window frame-minibuffer-window frame-selected-window
+ frame? frame-root-window frame-selected-window
  frame-width frame-height
- set-frame-root-window! set-frame-minibuffer-window! set-frame-selected-window!
+ set-frame-root-window! set-frame-selected-window!
  set-frame-width! set-frame-height!
 
  ;; query
@@ -33,7 +33,7 @@
  selected-window current-frame
 
  ;; create
- make-leaf-window make-internal-window make-minibuffer-window
+ make-leaf-window make-internal-window
  init-root-frame
 
  ;; layout
@@ -51,7 +51,7 @@
   ([parent #:mutable] [children #:mutable] [horizontal? #:mutable]
    [top #:mutable] [left #:mutable] [rows #:mutable] [cols #:mutable]
    [buffer #:mutable] [start #:mutable] [pointm #:mutable] [hscroll #:mutable]
-   [selected? #:mutable] [mini? #:mutable])
+   [selected? #:mutable])
   #:transparent)
 
 ;; ============================================================
@@ -59,7 +59,7 @@
 ;; ============================================================
 
 (struct frame
-  ([root-window #:mutable] [minibuffer-window #:mutable]
+  ([root-window #:mutable]
    [selected-window #:mutable] [width #:mutable] [height #:mutable])
   #:transparent)
 
@@ -77,8 +77,6 @@
       (if (window-leaf? w)
           (set! acc (cons w acc))
           (for ([child (in-list (window-children w))]) (dfs child)))))
-  (define mini (frame-minibuffer-window frm))
-  (when (and mini (window-live-p mini)) (set! acc (cons mini acc)))
   (reverse acc))
 
 (define current-frame (make-parameter #f))
@@ -93,15 +91,10 @@
   (define start-m (text-marker! tx 0 #f))
   ;; Use buffer's point marker; set initial position to buffer point
   (define pt-m (buffer-point-marker buf))
-  (window #f '() #f 0 0 0 0 buf start-m pt-m 0 #f #f))
+  (window #f '() #f 0 0 0 0 buf start-m pt-m 0 #f))
 
 (define (make-internal-window horizontal?)
-  (window #f '() horizontal? 0 0 0 0 #f #f #f 0 #f #f))
-
-(define (make-minibuffer-window buf)
-  (define pt-m (buffer-point-marker buf))
-  (window #f '() #f 0 0 0 0 buf #f pt-m 0 #f #t))
-
+  (window #f '() horizontal? 0 0 0 0 #f #f #f 0 #f))
 ;; ============================================================
 ;; Point — get/set point for a window via its buffer's marker
 ;; ============================================================
@@ -124,24 +117,17 @@
 (define (window-desired-rows w) (hash-ref window-desired-rows-table w (λ () 1)))
 (define (set-window-desired-rows! w rows) (hash-set! window-desired-rows-table w rows))
 
-(define (init-root-frame main-buf mini-buf width height)
-  (define root (make-leaf-window main-buf))
+(define (init-root-frame buf width height)
+  (define root (make-leaf-window buf))
   (set-window-selected?! root #t)
-  (define mini (make-minibuffer-window mini-buf))
-  (define frm (frame root mini root width height))
+  (define frm (frame root root width height))
   (layout-frame! frm)
   (current-frame frm)
   frm)
 
 (define (layout-frame! frm)
   (define fw (frame-width frm)) (define fh (frame-height frm))
-  (define mini (frame-minibuffer-window frm)) (define root (frame-root-window frm))
-  (when mini
-    (define mini-rows (window-desired-rows mini))
-    (set-window-top! mini (- fh mini-rows)) (set-window-left! mini 0)
-    (set-window-rows! mini mini-rows) (set-window-cols! mini fw))
-  (define root-rows (- fh (if mini (window-desired-rows mini) 0)))
-  (layout-subtree! root 0 0 root-rows fw))
+  (layout-subtree! (frame-root-window frm) 0 0 fh fw))
 
 (define (layout-subtree! w top left rows cols)
   (set-window-top! w top) (set-window-left! w left)
