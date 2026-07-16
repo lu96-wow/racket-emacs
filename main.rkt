@@ -57,7 +57,7 @@
   (define evt (read-key-event!))
 
   (cond
-    ;; ── Mouse events ──
+    ;; ── Mouse ──
     [(mouse-event? evt)
      (handle-mouse evt)
      ((unbox render-slot) (current-frame))
@@ -67,20 +67,19 @@
     [(and (key-event? evt)
           (key-event-ctrl? evt) (key-event-char evt)
           (char=? (char-downcase (key-event-char evt)) #\q))
-     (void)]  ;; tail position → terminate
+     (void)]
 
     [else
-     ;; ── Dispatch key to command ──
+     ;; ── Dispatch ──
      (define cmd (or (lookup-command default-bindings evt)
                      (and (self-insert-key? evt) cmd-self-insert)))
      (define win (selected-window))
      (define frm (current-frame))
      (when cmd
-       (define state (and (command-state-fn cmd)
-                          ((command-state-fn cmd) win frm)))
        ((command-fn cmd) win frm evt)
-       (when (command-undo-fn cmd)
-         (command-history-push! cmd state)))
+       ;; Commit buffer undo boundary after modifying commands
+       (when (command-modifies? cmd)
+         (recorder-commit! (buffer-undo-recorder (window-buffer win)))))
      ((unbox render-slot) frm)
      (event-loop)]))
 

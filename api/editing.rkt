@@ -2,9 +2,9 @@
 
 ;; api/editing.rkt — Window-level editing commands
 ;;
-;; Buffer-modifying commands use define-modify-command, which
-;; tells the event-loop to manage undo boundaries around execution.
-;; Navigation-only commands in navigation.rkt use define-command.
+;; Buffer-modifying commands set modifies? = #t so the event-loop
+;; commits a buffer undo boundary after execution.
+;; Undo/redo delegate directly to buffer-undo!/buffer-redo!.
 
 (require "../kernel/buffer.rkt"
          "../kernel/text.rkt"
@@ -24,53 +24,20 @@
  kill-ring-contents)
 
 ;; ============================================================
-;; Helper: make a buffer-modifying command
+;; Helper: modify-command — a command that modifies the buffer
 ;; ============================================================
-;; Undo delegates to buffer-undo! — the buffer's own undo ring
-;; handles the reversal.  No state capture needed.
 
 (define (modify-command name exec-fn)
-  (command name
-    exec-fn
-    ;; undo — delegate to buffer-level undo
-    (λ (win frm _state)
-      (buffer-undo! (window-buffer win)))
-    #f))
+  (command name exec-fn #t))
 
 ;; ============================================================
-;; Command-level undo/redo — operates on command history
-;; ============================================================
-
-(define-no-undo-command cmd-undo "undo" (win frm evt)
-  (define entry (command-history-pop!))
-  (when entry
-    (define cmd (car entry))
-    (define state (cdr entry))
-    ;; Push to redo before undoing
-    (when (command-state-fn cmd)
-      (command-redo-push! cmd ((command-state-fn cmd) win frm)))
-    ((command-undo-fn cmd) win frm state)))
-
-(define-no-undo-command cmd-redo "redo" (win frm evt)
-  (define entry (command-redo-pop!))
-  (when entry
-    (define cmd (car entry))
-    ;; Snapshot for undo chain
-    (define state (and (command-state-fn cmd)
-                       ((command-state-fn cmd) win frm)))
-    ;; Re-execute the command
-    ((command-fn cmd) win frm evt)
-    ;; Push back to undo history
-    (command-history-push! cmd state)))
-
-;; ============================================================
-;; Kill ring — shared string storage
+;; Kill ring
 ;; ============================================================
 
 (define kill-ring-contents (box ""))
 
 ;; ============================================================
-;; Buffer-modifying commands
+;; Editing commands (modify buffer → modifies? = #t)
 ;; ============================================================
 
 (define cmd-self-insert
@@ -128,15 +95,14 @@
           (cond [(>= p len) len]
                 [(char=? (gap-char gb p) #\newline) p]
                 [else (loop (gap-next-char-pos gb p))])))
-      (cond
-        [(= pt eol)
-         (when (< pt len)
-           (buffer-delete! buf pt (gap-next-char-pos gb pt))
-           (set-box! kill-ring-contents "\n"))]
-        [else
-         (define text (buffer-substring buf pt eol))
-         (buffer-delete! buf pt eol)
-         (set-box! kill-ring-contents text)]))))
+      (cond [(= pt eol)
+             (when (< pt len)
+               (buffer-delete! buf pt (gap-next-char-pos gb pt))
+               (set-box! kill-ring-contents "\n"))]
+            [else
+             (define text (buffer-substring buf pt eol))
+             (buffer-delete! buf pt eol)
+             (set-box! kill-ring-contents text)]))))
 
 (define cmd-yank
   (modify-command "yank"
@@ -148,11 +114,22 @@
         (buffer-insert! buf text pt)
         (set-buffer-point! buf (+ pt (bytes-length (string->bytes/utf-8 text))))))))
 
+;; Undo/redo — they modify buffer state, so modifies? = #t
+(define cmd-undo
+  (modify-command "undo"
+    (λ (win frm evt)
+      (buffer-undo! (window-buffer win)))))
+
+(define cmd-redo
+  (modify-command "redo"
+    (λ (win frm evt)
+      (buffer-redo! (window-buffer win)))))
+
 ;; ============================================================
-;; Non-modifying command (buffer setting, not content change)
+;; Non-modifying command
 ;; ============================================================
 
-(define-no-undo-command cmd-toggle-wrap-mode "toggle-wrap-mode" (win frm evt)
+(define-command cmd-toggle-wrap-mode "toggle-wrap-mode" (win frm evt)
   (define buf (window-buffer win))
   (define new-mode (if (eq? (buffer-wrap-mode buf) 'none) 'char 'none))
   (set-buffer-wrap-mode! buf new-mode)

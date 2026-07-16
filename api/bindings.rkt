@@ -1,9 +1,6 @@
 #lang racket
 
 ;; api/bindings.rkt — Key → command mapping
-;;
-;; A simple hash-based dispatch: (key-event → command).
-;; The event loop looks up the binding and executes the command.
 
 (require "../kernel/key-event/key-event.rkt"
          "command.rkt"
@@ -11,19 +8,11 @@
          "editing.rkt"
          "window-ops.rkt")
 
-(provide
- default-bindings
- lookup-command)
+(provide default-bindings lookup-command)
 
 ;; ============================================================
-;; Key predicates — used as hash keys (via make-key)
+;; Key struct for hash-based dispatch
 ;; ============================================================
-
-;; We use a simple approach: dispatch on symbol first, then char+modifiers.
-;; A key binding is a pair of (type . value):
-;;   type = 'symbol  → value is a key symbol like 'up, 'down, 'return
-;;   type = 'ctrl    → value is a lowercase char like #\q, #\f
-;;   type = 'char    → value is a char for self-insert
 
 (struct key (type value) #:transparent
   #:methods gen:equal+hash
@@ -43,7 +32,7 @@
         [else (key 'symbol 'unknown)]))
 
 ;; ============================================================
-;; Default bindings table
+;; Default bindings
 ;; ============================================================
 
 (define default-bindings
@@ -61,7 +50,6 @@
     (hash-set! t (key 'ctrl #\e)          cmd-end-of-line)
     (hash-set! t (key 'ctrl #\p)          cmd-prev-line)
     (hash-set! t (key 'ctrl #\n)          cmd-next-line)
-
     ;; Editing
     (hash-set! t (key 'symbol 'return)    cmd-newline)
     (hash-set! t (key 'symbol 'tab)       cmd-tab)
@@ -70,24 +58,12 @@
     (hash-set! t (key 'ctrl #\k)          cmd-kill-line)
     (hash-set! t (key 'ctrl #\y)          cmd-yank)
     (hash-set! t (key 'ctrl #\t)          cmd-toggle-wrap-mode)
-
     ;; Undo/Redo
     (hash-set! t (key 'ctrl #\_)          cmd-undo)
     (hash-set! t (key 'ctrl #\r)          cmd-redo)
-
     ;; Window
-    (hash-set! t (key 'ctrl #\x)          cmd-other-window)  ;; C-x o pattern: C-x then o
-    ;; For now, C-x o is simplified to just o after C-x prefix
-    ;; We'll handle prefix keys properly when we have a keymap
-
-    ;; Self-insert — catch-all for printable characters
-    ;; Handled directly in event-loop, not via lookup
-
+    (hash-set! t (key 'ctrl #\x)          cmd-other-window)
     t))
-
-;; ============================================================
-;; Lookup
-;; ============================================================
 
 (define (lookup-command bindings evt)
   (define k (key-event->key evt))
