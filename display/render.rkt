@@ -227,7 +227,7 @@
   (define gb  (text-gap tx))
   (define start-pos (if (window-start w) (text-marker-pos tx (window-start w)) 0))
   (define pt-pos    (if (window-selected? w) (buffer-point buf) (window-point w)))
-  (define content-rows (max 0 (sub1 rows)))
+  (define content-rows rows)
   (define left-col (window-hscroll w))
   (define wrap-mode (if (truncate-lines? buf) 'none 'char))
   (define vb (make-vbuffer rows cols))
@@ -237,7 +237,7 @@
                                           #:wrap-mode wrap-mode #:left-col left-col)])
           (render-visual-lines! vb buf gb vlines pt-pos cols content-rows))
         (values #f #f)))
-  (render-mode-line! vb content-rows cols buf c-row c-col)
+
   (values vb
           (and (or force-cursor? (window-selected? w)) c-row)
           (and (or force-cursor? (window-selected? w)) c-col)))
