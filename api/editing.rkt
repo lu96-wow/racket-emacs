@@ -6,6 +6,7 @@
          "../kernel/text.rkt"
          "../kernel/gap/query.rkt"
          "../kernel/key-event/key-event.rkt"
+         "../kernel/kill-ring/kill-ring.rkt"
          "../display/window.rkt"
          "../display/render.rkt"
          "../display/layout.rkt"
@@ -14,12 +15,9 @@
 (provide
  cmd-self-insert cmd-newline cmd-tab
  cmd-backward-delete cmd-forward-delete
- cmd-kill-line cmd-yank
+ cmd-kill-line cmd-yank cmd-yank-pop
  cmd-undo cmd-redo
- cmd-toggle-wrap-mode
- kill-ring-contents)
-
-(define kill-ring-contents (box ""))
+ cmd-toggle-wrap-mode)
 
 (define-modify-command cmd-self-insert "self-insert" (lf frm evt)
   (define ch (key-event-char evt))
@@ -54,6 +52,18 @@
     (define next (gap-next-char-pos gb pt))
     (buffer-delete! buf pt next)))
 
+;; ============================================================
+;; Yank state — module-level, shared between yank / yank-pop
+;; ============================================================
+
+(define yank-start-pos (box #f))
+(define yank-end-pos   (box #f))
+(define last-was-yank? (box #f))
+
+;; ============================================================
+;; kill-line
+;; ============================================================
+
 (define-modify-command cmd-kill-line "kill-line" (lf frm evt)
   (define buf (leaf-buffer lf))
   (define gb (text-gap (buffer-text buf)))
@@ -67,19 +77,51 @@
   (cond [(= pt eol)
          (when (< pt len)
            (buffer-delete! buf pt (gap-next-char-pos gb pt))
-           (set-box! kill-ring-contents "\n"))]
+           (kill-new "\n"))]
         [else
          (define text (buffer-substring buf pt eol))
          (buffer-delete! buf pt eol)
-         (set-box! kill-ring-contents text)]))
+         (kill-new text)])
+  (set-box! last-was-yank? #f))
+
+;; ============================================================
+;; yank
+;; ============================================================
 
 (define-modify-command cmd-yank "yank" (lf frm evt)
   (define buf (leaf-buffer lf))
-  (define text (unbox kill-ring-contents))
-  (when (positive? (string-length text))
+  (define text (kill-ring-yank))
+  (when (and text (positive? (string-length text)))
     (define pt (buffer-point buf))
+    (set-box! yank-start-pos pt)
     (buffer-insert! buf text pt)
-    (set-buffer-point! buf (+ pt (bytes-length (string->bytes/utf-8 text))))))
+    (define new-pt (+ pt (bytes-length (string->bytes/utf-8 text))))
+    (set-buffer-point! buf new-pt)
+    (set-box! yank-end-pos new-pt)
+    (set-box! last-was-yank? #t)))
+
+;; ============================================================
+;; yank-pop — M-y: replace last yanked text with previous kill
+;; ============================================================
+
+(define-modify-command cmd-yank-pop "yank-pop" (lf frm evt)
+  (unless (unbox last-was-yank?)
+    (error 'yank-pop "previous command was not a yank"))
+  (define buf (leaf-buffer lf))
+  (define prev-start (unbox yank-start-pos))
+  (define prev-end   (unbox yank-end-pos))
+  ;; Delete the previously yanked text
+  (when (and prev-start prev-end (> prev-end prev-start))
+    (buffer-delete! buf prev-start prev-end))
+  ;; Rotate and insert previous kill
+  (define text (or (kill-ring-pop)
+                   (current-kill)
+                   ""))
+  (when (positive? (string-length text))
+    (buffer-insert! buf text prev-start)
+    (define new-end (+ prev-start (bytes-length (string->bytes/utf-8 text))))
+    (set-buffer-point! buf new-end)
+    (set-box! yank-end-pos new-end)))
 
 (define-modify-command cmd-undo "undo" (lf frm evt)
   (buffer-undo! (leaf-buffer lf)))

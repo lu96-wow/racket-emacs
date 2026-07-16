@@ -32,6 +32,7 @@
   (keymap-set! global-keymap (key 'ctrl #\d)          cmd-forward-delete)
   (keymap-set! global-keymap (key 'ctrl #\k)          cmd-kill-line)
   (keymap-set! global-keymap (key 'ctrl #\y)          cmd-yank)
+  (keymap-set! global-keymap (key 'meta #\y)          cmd-yank-pop)
   (keymap-set! global-keymap (key 'ctrl #\t)          cmd-toggle-wrap-mode)
   ;; Undo/Redo
   (keymap-set! global-keymap (key 'ctrl #\_)          cmd-undo)

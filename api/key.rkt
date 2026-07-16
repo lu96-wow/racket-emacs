@@ -34,5 +34,7 @@
   (cond [(key-event-symbol evt) (key 'symbol (key-event-symbol evt))]
         [(and (key-event-ctrl? evt) (key-event-char evt))
          (key 'ctrl (char-downcase (key-event-char evt)))]
+        [(and (key-event-meta? evt) (key-event-char evt))
+         (key 'meta (char-downcase (key-event-char evt)))]
         [(key-event-char evt) (key 'char (key-event-char evt))]
         [else (key 'symbol 'unknown)]))

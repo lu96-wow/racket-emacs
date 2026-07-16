@@ -33,7 +33,7 @@
    ";;   C-f C-b C-n C-p    movement\n"
    ";;   C-a C-e            bol / eol\n"
    ";;   C-d C-k            delete / kill\n"
-   ";;   C-y C-_            yank / undo\n"
+   ";;   C-y M-y C-_        yank / yank-pop / undo\n"
    ";;   C-o                other window\n"
    ";;   C-2 C-3            split below / right\n"
    ";;   C-0 C-1            delete window / delete others\n"
