@@ -119,8 +119,8 @@
 ;; Editing commands
 ;; ============================================================
 
-(define (self-insert buf ke)
-  (define ch (key-event-char ke))
+(define (self-insert buf evt)
+  (define ch (key-event-char evt))
   (when ch
     (buffer-insert! buf (string ch) (buffer-point buf))))
 
@@ -181,99 +181,114 @@
 ;; ============================================================
 
 (define (event-loop buf)
-  (define ke (read-key-event!))
+  (define evt (read-key-event!))
   (define rec (buffer-undo-recorder buf))
 
   (cond
+    ;; Mouse event — set point at click position (never leaks to key processing)
+    [(mouse-event? evt)
+     (define frm (current-frame))
+     (define action (mouse-event-action evt))
+     (when (and frm (eq? action 'press))
+       (define-values (pos hit-win hit-type)
+         (screen-coord->buffer-pos frm (mouse-event-y evt) (mouse-event-x evt)))
+       (when (and pos (eq? hit-type 'text))
+         (set-buffer-point! buf pos)
+         ;; Switch buffer if clicked on a different buffer's window
+         (when (and hit-win (window-buffer hit-win)
+                    (not (eq? (window-buffer hit-win) buf)))
+           (set-buffer (window-buffer hit-win))
+           (set! buf (window-buffer hit-win)))))]
+
     ;; C-q → quit
-    [(and (key-event-ctrl? ke) (key-event-char ke)
-          (char=? (char-downcase (key-event-char ke)) #\q))
+    [(and (key-event-ctrl? evt) (key-event-char evt)
+          (char=? (char-downcase (key-event-char evt)) #\q))
      (void)]
 
     ;; Self-insert
-    [(self-insert-key? ke)
-     (self-insert buf ke)]
+    [(self-insert-key? evt)
+     (self-insert buf evt)]
 
     ;; Backspace
-    [(backspace-key? ke)
+    [(backspace-key? evt)
      (backward-delete buf)]
 
     ;; Return
-    [(return-key? ke)
+    [(return-key? evt)
      (cmd-newline buf)]
 
     ;; Tab
-    [(and (key-event-char ke) (char=? (key-event-char ke) #\tab))
-     (self-insert buf ke)]
+    [(and (key-event-char evt) (char=? (key-event-char evt) #\tab))
+     (self-insert buf evt)]
 
     ;; C-f / right
-    [(or (and (key-event-ctrl? ke) (key-event-char ke)
-              (char=? (char-downcase (key-event-char ke)) #\f))
-         (eq? (key-event-symbol ke) 'right))
+    [(or (and (key-event-ctrl? evt) (key-event-char evt)
+              (char=? (char-downcase (key-event-char evt)) #\f))
+         (eq? (key-event-symbol evt) 'right))
      (forward-char buf)]
 
     ;; C-b / left
-    [(or (and (key-event-ctrl? ke) (key-event-char ke)
-              (char=? (char-downcase (key-event-char ke)) #\b))
-         (eq? (key-event-symbol ke) 'left))
+    [(or (and (key-event-ctrl? evt) (key-event-char evt)
+              (char=? (char-downcase (key-event-char evt)) #\b))
+         (eq? (key-event-symbol evt) 'left))
      (backward-char buf)]
 
     ;; C-a / home
-    [(or (and (key-event-ctrl? ke) (key-event-char ke)
-              (char=? (char-downcase (key-event-char ke)) #\a))
-         (eq? (key-event-symbol ke) 'home))
+    [(or (and (key-event-ctrl? evt) (key-event-char evt)
+              (char=? (char-downcase (key-event-char evt)) #\a))
+         (eq? (key-event-symbol evt) 'home))
      (beginning-of-line buf)]
 
     ;; C-e / end
-    [(or (and (key-event-ctrl? ke) (key-event-char ke)
-              (char=? (char-downcase (key-event-char ke)) #\e))
-         (eq? (key-event-symbol ke) 'end))
+    [(or (and (key-event-ctrl? evt) (key-event-char evt)
+              (char=? (char-downcase (key-event-char evt)) #\e))
+         (eq? (key-event-symbol evt) 'end))
      (end-of-line buf)]
 
     ;; C-p / up
-    [(or (and (key-event-ctrl? ke) (key-event-char ke)
-              (char=? (char-downcase (key-event-char ke)) #\p))
-         (eq? (key-event-symbol ke) 'up))
+    [(or (and (key-event-ctrl? evt) (key-event-char evt)
+              (char=? (char-downcase (key-event-char evt)) #\p))
+         (eq? (key-event-symbol evt) 'up))
      (prev-line buf)]
 
     ;; C-n / down
-    [(or (and (key-event-ctrl? ke) (key-event-char ke)
-              (char=? (char-downcase (key-event-char ke)) #\n))
-         (eq? (key-event-symbol ke) 'down))
+    [(or (and (key-event-ctrl? evt) (key-event-char evt)
+              (char=? (char-downcase (key-event-char evt)) #\n))
+         (eq? (key-event-symbol evt) 'down))
      (next-line buf)]
 
     ;; C-t: toggle wrap mode
-    [(and (key-event-ctrl? ke) (key-event-char ke)
-          (char=? (char-downcase (key-event-char ke)) #\t))
+    [(and (key-event-ctrl? evt) (key-event-char evt)
+          (char=? (char-downcase (key-event-char evt)) #\t))
      (define new-mode (if (eq? (buffer-wrap-mode buf) (quote none)) (quote char) (quote none)))
      (set-buffer-wrap-mode! buf new-mode)
      ;; (no minibuffer yet) (void)
      (invalidate-frame-cache!)]
 
     ;; C-d: delete forward
-    [(and (key-event-ctrl? ke) (key-event-char ke)
-          (char=? (char-downcase (key-event-char ke)) #\d))
+    [(and (key-event-ctrl? evt) (key-event-char evt)
+          (char=? (char-downcase (key-event-char evt)) #\d))
      (forward-delete buf)]
 
     ;; C-k: kill line
-    [(and (key-event-ctrl? ke) (key-event-char ke)
-          (char=? (char-downcase (key-event-char ke)) #\k))
+    [(and (key-event-ctrl? evt) (key-event-char evt)
+          (char=? (char-downcase (key-event-char evt)) #\k))
      (kill-line buf)]
 
     ;; C-y: yank
-    [(and (key-event-ctrl? ke) (key-event-char ke)
-          (char=? (char-downcase (key-event-char ke)) #\y))
+    [(and (key-event-ctrl? evt) (key-event-char evt)
+          (char=? (char-downcase (key-event-char evt)) #\y))
      (yank buf)]
 
     ;; C-_ / C-/ : undo
-    [(and (key-event-ctrl? ke) (key-event-char ke)
-          (or (char=? (key-event-char ke) #\_)
-              (char=? (key-event-char ke) #\/)))
+    [(and (key-event-ctrl? evt) (key-event-char evt)
+          (or (char=? (key-event-char evt) #\_)
+              (char=? (key-event-char evt) #\/)))
      (buffer-undo! buf)]
 
     ;; C-r: redo
-    [(and (key-event-ctrl? ke) (key-event-char ke)
-          (char=? (char-downcase (key-event-char ke)) #\r))
+    [(and (key-event-ctrl? evt) (key-event-char evt)
+          (char=? (char-downcase (key-event-char evt)) #\r))
      (buffer-redo! buf)]
 
     [else (void)])
@@ -284,9 +299,10 @@
   ;; Redraw via frame
   ((unbox render-slot) (current-frame))
 
-  ;; Continue unless quit
-  (unless (and (key-event-ctrl? ke) (key-event-char ke)
-               (char=? (char-downcase (key-event-char ke)) #\q))
+  ;; Continue unless quit (mouse events don't quit)
+  (unless (and (key-event? evt)
+               (key-event-ctrl? evt) (key-event-char evt)
+               (char=? (char-downcase (key-event-char evt)) #\q))
     (event-loop buf)))
 
 ;; ============================================================
@@ -301,7 +317,7 @@
     (detect-color-depth!)
     (format-alt-screen-enable)
     (display format-clear-screen)
-    (display format-mouse-disable)
+    (display format-mouse-enable)
     (display format-bracketed-paste-disable)
     (flush-output)
 

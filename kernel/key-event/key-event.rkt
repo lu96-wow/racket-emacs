@@ -1,32 +1,32 @@
 #lang racket
 
-;; kernel/key-event/key-event.rkt — Key event (pure abstract data)
+;; kernel/key-event/key-event.rkt — Key event + mouse event (pure abstract data)
 ;;
-;; A key-event is the output of terminal decoding — a structured
-;; description of one keypress.  It has NO knowledge of terminal
-;; byte sequences (no #\rubout, no Ctrl-g char-ci=? hacks).
-;; The platform/event layer is responsible for mapping raw bytes
-;; to this abstract representation.
+;; Two event types:
+;;   key-event   — keyboard input
+;;   mouse-event — mouse actions (separate struct, never conflated with keys)
 ;;
 ;; Fields:
-;;   char   — (or/c char? #f)  displayable character (letter/digit/punct)
-;;   ctrl?  — boolean?         control modifier
-;;   meta?  — boolean?         meta/alt modifier
-;;   shift? — boolean?         shift modifier
-;;   symbol — (or/c symbol? #f) named key (up/down/f1/escape/backspace...)
+;;   key-event: char, ctrl?, meta?, shift?, symbol
+;;   mouse-event: button, x, y, action, shift?, alt?, ctrl?
 
 (provide
  key-event? key-event
  key-event-char key-event-ctrl? key-event-meta? key-event-shift?
  key-event-symbol
 
+ mouse-event? mouse-event
+ mouse-event-button mouse-event-x mouse-event-y
+ mouse-event-action mouse-event-shift? mouse-event-alt? mouse-event-ctrl?
+
+ input-event?
  key-symbol?
  self-insert-key? backspace-key? return-key? cancel-key?
 
- key-event->description)
+ key-event->description mouse-event->description)
 
 ;; ============================================================
-;; Struct
+;; Structs
 ;; ============================================================
 
 (struct key-event
@@ -36,6 +36,18 @@
    shift?   ; boolean?
    symbol)  ; (or/c symbol? #f)
   #:transparent)
+
+(struct mouse-event
+  (button   ; 'left 'middle 'right 'wheel-up 'wheel-down
+   x        ; 0-based column
+   y        ; 0-based row
+   action   ; 'press 'release 'scroll-up 'scroll-down
+   shift?   ; boolean?
+   alt?     ; boolean?
+   ctrl?)   ; boolean?
+  #:transparent)
+
+(define (input-event? x) (or (key-event? x) (mouse-event? x)))
 
 ;; ============================================================
 ;; Known key symbols — all named keys the kernel recognises
@@ -59,43 +71,54 @@
 
 (define (self-insert-key? ke)
   ;; Has a printable character (≥32, excluding DEL), no modifying flags.
-  (define ch (key-event-char ke))
-  (and ch
-       (not (key-event-ctrl? ke))
-       (not (key-event-meta? ke))
-       (>= (char->integer ch) 32)
-       (not (char=? ch #\rubout))))
+  ;; Returns #f for non-key-events (mouse, etc.).
+  (and (key-event? ke)
+       (let ([ch (key-event-char ke)])
+         (and ch
+              (not (key-event-ctrl? ke))
+              (not (key-event-meta? ke))
+              (>= (char->integer ch) 32)
+              (not (char=? ch #\rubout))))))
 
 (define (backspace-key? ke)
-  (eq? (key-event-symbol ke) 'backspace))
+  (and (key-event? ke) (eq? (key-event-symbol ke) 'backspace)))
 
 (define (return-key? ke)
-  (eq? (key-event-symbol ke) 'return))
+  (and (key-event? ke) (eq? (key-event-symbol ke) 'return)))
 
 (define (cancel-key? ke)
-  ;; Escape or platform-mapped cancel.
-  (or (eq? (key-event-symbol ke) 'escape)
-      (eq? (key-event-symbol ke) 'cancel)))
+  (and (key-event? ke)
+       (or (eq? (key-event-symbol ke) 'escape)
+           (eq? (key-event-symbol ke) 'cancel))))
 
 ;; ============================================================
 ;; Display
 ;; ============================================================
 
 (define (key-event->description ke)
-  (define parts '())
-  (when (key-event-shift? ke) (set! parts (cons "S-" parts)))
-  (when (key-event-meta? ke)  (set! parts (cons "M-" parts)))
-  (when (key-event-ctrl? ke)  (set! parts (cons "C-" parts)))
-  (cond
-    [(key-event-symbol ke)
-     (string-append (string-join parts "")
-                    (symbol->string (key-event-symbol ke)))]
-    [(key-event-char ke)
-     (define ch (key-event-char ke))
-     (string-append (string-join parts "")
-                    (match ch
-                      [#\space "SPC"]
-                      [#\newline "RET"]
-                      [#\tab "TAB"]
-                      [_ (string ch)]))]
-    [else "???"]))
+  (cond [(mouse-event? ke) (mouse-event->description ke)]
+        [else
+         (define parts '())
+         (when (key-event-shift? ke) (set! parts (cons "S-" parts)))
+         (when (key-event-meta? ke)  (set! parts (cons "M-" parts)))
+         (when (key-event-ctrl? ke)  (set! parts (cons "C-" parts)))
+         (cond
+           [(key-event-symbol ke)
+            (string-append (string-join parts "")
+                           (symbol->string (key-event-symbol ke)))]
+           [(key-event-char ke)
+            (define ch (key-event-char ke))
+            (string-append (string-join parts "")
+                           (match ch
+                             [#\space "SPC"]
+                             [#\newline "RET"]
+                             [#\tab "TAB"]
+                             [_ (string ch)]))]
+           [else "???"])]))
+
+(define (mouse-event->description me)
+  (format "mouse-~a ~a (~a,~a)"
+          (mouse-event-button me)
+          (mouse-event-action me)
+          (mouse-event-x me)
+          (mouse-event-y me)))
