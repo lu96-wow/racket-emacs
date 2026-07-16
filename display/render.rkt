@@ -175,6 +175,11 @@
       (let ([bol (gap-scan-byte gb pt 'backward (λ (b) (= b #x0A)))])
         (gap-display-width gb (if (>= bol 0) (add1 bol) 0) pt)))
     (define hs (window-hscroll w))
+    ;; Horizontal auto-scroll.
+    ;; Threshold: scroll right when pt-col reaches or exceeds hs+cols.
+    ;; target = pt-col - cols - 1  keeps 1 column of breathing room
+    ;; on the right edge.  Using 1 (not 0) ensures CJK wide characters
+    ;; (display-width 2) are not clipped mid-glyph at the boundary.
     (cond
       [(< pt-col hs)        (set-window-hscroll! w pt-col)]
       [(>= pt-col (+ hs cols)) (set-window-hscroll! w (max 0 (- pt-col cols -1)))]
