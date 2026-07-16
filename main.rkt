@@ -20,6 +20,8 @@
          "display/registry.rkt"
          "display/face.rkt"
          "api/command.rkt"
+         "api/keymap.rkt"
+         "api/mode.rkt"
          "api/navigation.rkt"
          "api/editing.rkt"
          "api/window-ops.rkt"
@@ -71,7 +73,8 @@
 
     [else
      ;; ── Dispatch ──
-     (define cmd (or (lookup-command default-bindings evt)
+     (define buf (and win (window-buffer win)))
+     (define cmd (or (and buf (lookup-key buf evt))
                      (and (self-insert-key? evt) cmd-self-insert)))
      (define win (selected-window))
      (define frm (current-frame))
@@ -120,11 +123,22 @@
     (display format-bracketed-paste-disable)
     (flush-output)
 
+    (init-global-keymap!)
+
+    ;; Register modes (pattern → keymap)
+    ;; Racket mode: ".rkt" files get local overrides
+    (define racket-km (make-keymap))
+    ;; Example override — C-t switches to racket-specific behavior
+    ;; (actual racket mode would have more bindings)
+    (register-mode! (editor-mode 'racket racket-km ".rkt"))
+
     (define main-buf (get-buffer-create "*scratch*"))
     (buffer-insert! main-buf welcome-text 0)
     (set-buffer-point! main-buf 0)
     (set-buffer main-buf)
     (register-buffer! main-buf)
+    ;; Give scratch buffer a racket filename so racket mode applies
+    (init-buffer-with-filename! main-buf "*scratch*.rkt")
 
     (void (init-root-frame main-buf (terminal-width) (terminal-height)))
     ((unbox render-slot) (current-frame))
