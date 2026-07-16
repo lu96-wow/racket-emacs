@@ -40,6 +40,9 @@
 (define MIN-ROWS 4)
 (define MIN-COLS 15)
 
+;; Dirty flag: set on resize, cleared after full redraw with clear-screen
+(define frame-dirty? (make-hasheq))
+
 (define render-slot (box #f))
 
 (define (render-too-small frm)
@@ -49,6 +52,7 @@
   (display format-cursor-hide)
   (define msg "window too small")
   (define pad (max 0 (quotient (- w (string-length msg)) 2)))
+  (hash-remove! frame-dirty? frm)
   (display format-clear-screen)
   (when (and (>= h 1) (>= w (string-length msg)))
     (display (format-cursor-move (quotient h 2) 0))
@@ -252,7 +256,12 @@
 
 (define (display-frame frm)
   (detect-terminal-size!)
+  (update-frame-size! frm)
   (init-face-cache!)
+  ;; Full redraw if frame was resized (dirty flag)
+  (when (hash-ref frame-dirty? frm #f)
+    (display format-clear-screen)
+    (hash-remove! frame-dirty? frm))
   (define leaves (filter window-leaf? (frame-window-list frm)))
   (for ([w (in-list leaves)]) (recenter-point! w))
   (define-values (new-vb cr cc) (compose-frame! frm))
