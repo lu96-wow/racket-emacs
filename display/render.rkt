@@ -28,6 +28,7 @@
  screen-coord->buffer-pos
  ;; re-export minibuf setters for main
  set-bottom-line-echo! set-bottom-line-doc!
+ buffer-wrap-mode set-buffer-wrap-mode!
  bottom-line-doc-rows)
 
 ;; ============================================================

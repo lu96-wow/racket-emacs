@@ -242,6 +242,14 @@
          (eq? (key-event-symbol ke) 'down))
      (next-line buf)]
 
+    ;; C-t: toggle wrap mode
+    [(and (key-event-ctrl? ke) (key-event-char ke)
+          (char=? (char-downcase (key-event-char ke)) #\t))
+     (define new-mode (if (eq? (buffer-wrap-mode buf) (quote none)) (quote char) (quote none)))
+     (set-buffer-wrap-mode! buf new-mode)
+     (set-bottom-line-echo! (format "Wrap: ~a" new-mode))
+     (invalidate-frame-cache!)]
+
     ;; C-d: delete forward
     [(and (key-event-ctrl? ke) (key-event-char ke)
           (char=? (char-downcase (key-event-char ke)) #\d))
@@ -309,6 +317,7 @@
 
     ;; Create frame
     (void (init-root-frame main-buf mini-buf (terminal-width) (terminal-height)))
+    (display-frame (current-frame))
 
     (with-handlers ([exn:break? (λ (e) (void))])
       (event-loop main-buf))
