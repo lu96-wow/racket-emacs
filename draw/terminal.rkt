@@ -1,32 +1,33 @@
 #lang racket
 
-;; display/flush.rkt — vbuffer → terminal output (delta flush)
+;; platform/terminal.rkt — vbuffer → ANSI terminal output (delta flush)
 ;;
 ;; Compares new vbuffer against cached previous frame.
 ;; Only outputs changed rows.  State machine tracks active face-id
 ;; and attributes to minimize ANSI escape overhead.
 ;;
-;; This is the ONLY module in display/ with side effects (display to stdout).
+;; This is the only module in the pipeline with terminal side effects.
 ;; Dependencies: display/vbuffer, display/face, platform/ansi.
 
-(require "vbuffer.rkt"
-         "face.rkt"
-         "char-width.rkt"
+(require "../display/vbuffer.rkt"
+         "../display/face.rkt"
+         "../display/char-width.rkt"
          "../platform/ansi.rkt")
 
 (provide
- flush-vbuffer!
- flush-vbuffer-delta!)
+ terminal-flush!
+ terminal-flush-delta!)
 
 ;; ============================================================
-;; flush-vbuffer! — full flush (first frame or after resize)
+;; terminal-flush! — full flush (first frame or after resize)
 ;; ============================================================
 
-(define (flush-vbuffer! vb)
+(define (terminal-flush! vb face-cache)
+
   (define cells (vbuffer-cells vb))
   (define cols (vbuffer-cols vb))
   (define rows (vbuffer-rows vb))
-  (define faces-by-id (face-cache-by-id (current-face-cache)))
+  (define faces-by-id (face-cache-by-id face-cache))
   (define out (open-output-string))
 
   (for ([r (in-range rows)])
@@ -37,14 +38,14 @@
   (display (get-output-string out)))
 
 ;; ============================================================
-;; flush-vbuffer-delta! — row-by-row diff against cache
+;; terminal-flush-delta! — row-by-row diff against cache
 ;; ============================================================
 
-(define (flush-vbuffer-delta! new-vb cache-vb)
+(define (terminal-flush-delta! new-vb cache-vb face-cache)
   (define new-cells (vbuffer-cells new-vb))
   (define cols (vbuffer-cols new-vb))
   (define rows (vbuffer-rows new-vb))
-  (define faces-by-id (face-cache-by-id (current-face-cache)))
+  (define faces-by-id (face-cache-by-id face-cache))
   (define out (open-output-string))
 
   (for ([r (in-range rows)])
@@ -65,6 +66,7 @@
 (define (flush-row-cells! out cols cells row-start faces-by-id)
   (define active-face-id  0)
   (define active-attrs #f)
+
   (let loop ([c 0] [skip? #f])
     (when (< c cols)
       (define cl (vector-ref cells (+ row-start c)))
@@ -138,44 +140,38 @@
 
   (parameterize ([color-depth 'truecolor])
     (init-face-cache!)
+    (define fc (current-face-cache))
 
-    (test-case "flush-vbuffer! produces output"
+    (test-case "terminal-flush! produces output"
       (let ([vb (make-vbuffer 2 5)])
         (vbuffer-put-string! vb 0 0 "hello")
         (vbuffer-put-string! vb 1 0 "world")
         (define out (with-output-to-string
-                      (λ () (flush-vbuffer! vb))))
-        ;; Should contain cursor moves and text
+                      (λ () (terminal-flush! vb fc))))
         (check-true (string-contains? out "hello"))
         (check-true (string-contains? out "world"))))
 
-    (test-case "flush-vbuffer-delta! skips unchanged rows"
+    (test-case "terminal-flush-delta! skips unchanged rows"
       (let ([vb1 (make-vbuffer 3 5)]
             [vb2 (make-vbuffer 3 5)])
         (vbuffer-put-string! vb1 0 0 "abcde")
         (vbuffer-put-string! vb1 1 0 "fghij")
-        ;; vb2 same as vb1 initially
         (vbuffer-put-string! vb2 0 0 "abcde")
         (vbuffer-put-string! vb2 1 0 "fghij")
-        ;; Change row 2 in vb2
         (vbuffer-put-string! vb2 2 0 "ZZZZZ")
         (define out (with-output-to-string
-                      (λ () (flush-vbuffer-delta! vb2 vb1))))
-        ;; Should only contain row 2 (index 2)
+                      (λ () (terminal-flush-delta! vb2 vb1 fc))))
         (check-true (string-contains? out "ZZZZZ"))
-        ;; Should NOT contain row 0 or 1 content
         (check-false (string-contains? out "abcde"))
         (check-false (string-contains? out "fghij"))))
 
     (test-case "face changes produce ANSI codes"
       (let* ([vb (make-vbuffer 1 10)])
-        (define fc (current-face-cache))
         (define-face! 'keyword (make-face-attrs attr-foreground 1))
-        (define kid (face-id-for-name 'keyword))
+        (define kid (face-id-for-name 'keyword fc))
         (vbuffer-put-char! vb 0 0 #\H #:face-id 0)
         (vbuffer-put-char! vb 0 1 #\i #:face-id kid)
         (define out (with-output-to-string
-                      (λ () (flush-vbuffer! vb))))
-        ;; Should contain ANSI escape for color change
+                      (λ () (terminal-flush! vb fc))))
         (check-true (string-contains? out "\e[38"))
         (check-true (string-contains? out "Hi"))))))

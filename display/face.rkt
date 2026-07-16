@@ -157,8 +157,7 @@
 (define (define-face! name attrs)
   (hash-set! named-face-table name attrs))
 
-(define (face-id-for-name name)
-  (define fc (current-face-cache))
+(define (face-id-for-name name [fc (current-face-cache)])
   (cond [(not fc) 0]
         [(hash-has-key? named-face-table name)
          (realized-face-id
@@ -182,8 +181,8 @@
   (for ([(k v) (in-hash overlay-props)] #:when v) (hash-set! merged k v))
   (face-attrs merged))
 
-(define (face-id-with-overlay base-face-name overlay-face-name)
-  (define fc (current-face-cache))
+(define (face-id-with-overlay base-face-name overlay-face-name
+                               [fc (current-face-cache)])
   (and fc
        (let* ([base-attrs  (if base-face-name
                                 (face-attrs-by-name base-face-name)

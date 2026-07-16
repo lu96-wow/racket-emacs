@@ -86,7 +86,7 @@
         (if (or base-face overlay)
             (let ([key (cons base-face overlay)])
               (hash-ref! face-cache-map key
-                (λ () (or (face-id-with-overlay base-face overlay) 0))))
+                (λ () (or (face-id-with-overlay base-face overlay face-cache) 0))))
             0))
 
       ;; Character display width
