@@ -1,0 +1,314 @@
+racket-emacs-rebuild — 架构文档
+===============================
+
+设计原则
+--------
+
+1. 每一层只实现自己关心的核心原语，不感知上层或下层实现细节。
+2. 高层通过组合底层原语构建，不侵入底层代码。
+3. 数据变更信息通过返回值显式传递，不依赖隐藏状态。
+4. 纯计算与副作用严格分离 — compute 产生值，apply 执行效果。
+5. 依赖关系是单向的：kernel ← lang ← display ← draw ← platform。
+
+
+数据流
+------
+
+  platform/event.rkt                platform/termios.rkt
+       │  raw bytes → key-event          │  raw mode + size
+       ▼                                 │
+  kernel/edit.rkt                        │
+       │  dirty-buffer × event →         │
+       ▼  dirty-buffer                   ▼
+  lang/font-lock.rkt               platform/ansi.rkt
+       │  gb,tp,config,ext → face符号        │  ANSI 格式串
+       ▼                                      │
+  display/layout.rkt    display/face.rkt      │
+       │  gb → visual-lines    │  face符号→id  │
+       ▼                      ▼               │
+  display/render.rkt                          │
+       │  layout + faces → vbuffer            │
+       ▼                                      ▼
+  draw/terminal.rkt
+       │  vbuffer → ANSI → stdout
+       ▼
+     屏幕
+
+
+分层架构
+--------
+
+kernel/data/    存储原语（数据结构 + 操作）
+kernel/         编辑器核心（数据组合 + 命令）
+lang/           语言配置（语法分类 + 着色规则）
+display/        纯渲染数据变换（无副作用）
+draw/           输出层（终端特定，有副作用）
+platform/       平台抽象（终端控制、输入、ANSI格式串）
+
+
+═══════════════════════════════════════════════════════════════
+kernel/data — 存储原语
+═══════════════════════════════════════════════════════════════
+
+gap.rkt — Gap Buffer
+  字节级可变文本容器。逻辑布局：
+    [text-before] [gap] [text-after]
+  所有位置均为字节偏移。对上层完全透明。
+  公开接口(7): make-gap-buffer, gap-length, gap-byte-ref,
+    gap-subbytes, gap-insert!, gap-delete!.
+  依赖: 零。
+
+marker.rkt — 位置标记
+  纯数据结构 (marker pos insertion-type)。
+  insertion-type=#t 时标记留在插入文本之后，#f 时留在之前。
+  调整逻辑由 text.rkt 统一管理，不在 marker 内部。
+  依赖: 零。
+
+utf8.rkt — UTF-8 编解码
+  纯函数，零依赖。提供 utf8-start-byte?, utf8-char-len,
+  utf8-encode, utf8-decode, utf8-next-pos, utf8-prev-pos.
+  依赖: 零。
+
+query.rkt — 字符级查询
+  组合 gap.rkt + utf8.rkt。gap-char+len 解码单字符并返回字节长度。
+  gap-substring 提取区间字符串。gap-next-char-pos / gap-prev-char-pos
+  处理 gap 边界穿越。gap-scan-byte / gap-scan-char 按方向扫描匹配。
+  gap-match-str-at 从字节位置匹配字面串。
+  依赖: gap.rkt, utf8.rkt。
+
+text.rkt — Text 原子
+  组合 gap + marker 列表为不可分割的编辑原子。
+  text-insert! / text-delete! 同步调整 gap 和所有 marker。
+  adjust-markers-insert! / adjust-markers-delete! 是纯函数，独立可测试。
+  依赖: gap.rkt, marker.rkt。
+
+textprop.rkt — 文本属性
+  基于 data/interval-map 的区间属性容器。
+  在任意字节区间 [from, to) 上挂 key-value 元数据。
+  insert/delete 时通过 expand!/contract! 自动跟随文本调整。
+  依赖: data/interval-map (Racket 标准库)。
+
+
+═══════════════════════════════════════════════════════════════
+kernel — 编辑器核心
+═══════════════════════════════════════════════════════════════
+
+buffer.rkt — Buffer 组合层
+  组合 text + textprop + undo + point/mark 为完整的编辑器 buffer。
+  所有 mutation 返回变更区间 (values start end)。
+  不存储脏标记或显示状态。
+  make-buffer 创建时初始化 gap+markers+undo+text-props。
+  buffer-insert!/delete! 返回变更区间。
+  buffer-undo!/redo! 返回恢复/重做的区间或 (values #f #f)。
+  point/mark 通过 marker 管理，region 由 point 和 mark 定义。
+  查询: buffer-length, buffer-substring, buffer-string.
+  依赖: data/text.rkt, data/textprop.rkt, undo/*.rkt。
+
+undo/record.rkt — Undo 数据类型
+  纯数据类型: undo-insert(beg,end), undo-delete(text,beg),
+  undo-group(records)。undo-insert 不存储文本（undo 时文本仍在 buffer），
+  undo-delete 存储被删文本（恢复时需要）。
+  依赖: 零。
+
+undo/recorder.rkt — Undo 录制器
+  录制器持有 undo-stack, redo-stack, pending。
+  recorder-record-insert! 自动合并相邻插入。
+  recorder-record-delete! 存储被删文本。
+  recorder-commit! 将 pending 转为 undo-group 推入 undo-stack，
+  同时清空 redo-stack（新编辑使重做历史无效）。
+  依赖: record.rkt。
+
+undo/exec.rkt — Undo 执行
+  execute-undo! — 逆序执行 undo-group 中的操作（insert 变 delete, delete 变 insert）。
+  execute-redo! — 顺序执行。
+  依赖: ../data/text.rkt, record.rkt。
+
+dirty.rkt — 脏视图包装
+  包装 buffer，在 mutation 返回值基础上累积变更区间。
+  类型: (dirty-buffer buf changes), changes 为 (listof (cons start end))。
+  每个 mutation 返回 struct-copy 的新 dirty-buffer（buffer 对象不变）。
+  dirty-extent 合并所有变更为最小区间。
+  dirty-clear! 返回清空 changes 的新值。
+  dirty-dirty? 检查是否有内容变更。
+  零全局可变状态 — db 值由事件循环持有并传递。
+  依赖: data/text.rkt, buffer.rkt, undo/recorder.rkt。
+
+edit.rkt — 编辑命令
+  组合 dirty-buffer + key-event + kill-ring。签名统一：
+    dirty-buffer × key-event → dirty-buffer
+  内容修改命令（self-insert, newline, backward-delete, forward-delete,
+  kill-line, yank, yank-pop, undo, redo）返回含变更的 db。
+  移动命令（forward/backward-char, beginning/end-of-line）只移动 point，
+  不产生内容变更。mark/region 命令操作 mark marker。
+  依赖: dirty.rkt, buffer.rkt, data/text.rkt, data/query.rkt,
+        key-event.rkt, kill-ring.rkt, undo/recorder.rkt。
+
+key-event.rkt — 输入事件类型
+  纯数据类型: key-event(char, ctrl?, meta?, shift?, symbol),
+  mouse-event(button, x, y, action, shift?, alt?, ctrl?)。
+  提供分类: self-insert-key?, backspace-key?, return-key?, cancel-key?。
+  依赖: 零。
+
+kill-ring.rkt — 剪切环
+  字符串环形缓冲区。模块级可变状态（跨 buffer 共享）。
+  kill-new 推入并截断（max 60），kill-ring-yank 返回当前项，
+  kill-ring-pop 旋转到上一项。
+  依赖: 零。
+
+
+═══════════════════════════════════════════════════════════════
+lang — 语言配置
+═══════════════════════════════════════════════════════════════
+
+syntax.rkt — 语法表
+  字符→语法类别的规则系统。9 种语法类别：
+  word, whitespace, open, close, string-quote, comment-start,
+  escape, expression-prefix, punctuation。
+  syntax-table 持 parent（继承链）和 multi-rules（块注释、heredoc 等）。
+  char-syntax 沿 parent 链查找，fallback 为 punctuation。
+  make-standard-syntax-table 定义 Lisp 基础规则。
+  make-racket-syntax-table 叠加 #|...|# 和 #<< 规则。
+  依赖: 零。
+
+font-lock.rkt — 着色引擎
+  扫描 buffer 文本，根据语法表和关键词规则向 text-props 写入 face 符号。
+  两遍扫描:
+    fontify-syntax! — 语法表驱动。处理行注释、字符串、块注释、heredoc。
+      状态机: normal / string / block-comment / here-string。
+    fontify-keywords! — 正则匹配关键词，只在无现有 face 的位置写入。
+  fontify-region! — 清空区域旧 face，运行全部 pass。
+  fontify-changed! — 从变更区域扩展前后各 15 行，然后 fontify-region!。
+  配置通过 font-lock-config struct 显式传入（syntax-table, keywords, case-fold?）。
+  依赖: kernel/data (gap, query, textprop), syntax.rkt。
+
+
+═══════════════════════════════════════════════════════════════
+display — 纯渲染数据变换（零副作用）
+═══════════════════════════════════════════════════════════════
+
+vbuffer.rkt — Cell 网格
+  屏幕离屏缓冲区。纯数据结构，零依赖。
+  cell: (cell ch attrs face-id)。
+  vbuffer: (vbuffer rows cols cells) — cells 为 (vectorof cell?)，行优先。
+  提供 put-char!, put-string!, fill!, blit!（区域复制）。
+  vbuffer-row-changed? / vbuffer-cell-equal? 用于增量 flush。
+  依赖: 零。
+
+char-width.rkt — 字符宽度
+  将 Unicode codepoint 映射为 0/1/2 显示列。
+  gap-display-width 计算区间显示列数。
+  scan-display-width 向前扫描最多 max-width 列，返回字节位置。
+  依赖: kernel/data (gap, query)。
+
+layout.rkt — 布局计算
+  纯函数: gap-buffer × viewport 参数 → layout 值。
+  layout 打包: visual-lines + cursor-row/col + start-pos + max-rows/cols + wrap + hscroll。
+  两种模式:
+    truncate — 每逻辑行一个 visual-line，溢出截断标记 '$'。
+    wrap     — 按 max-cols 拆分逻辑行，续行标记 continued?。
+  visual-line 包含 end-buf-pos，支持 O(row) 屏幕坐标→buffer位置查询。
+  layout-query-pos: gb + layout + (row,col) → buffer byte-pos。
+  pos->row-col: gb + start + target → (row, col)。
+  所有参数显式传入（#:wrap-mode, #:left-col），无副作用表。
+  依赖: kernel/data (gap, query), char-width.rkt。
+
+face.rkt — 样式系统
+  三层:
+    face-attrs — 逻辑属性（前景色、背景色、粗细、斜体、下划线、反相）。
+    face-cache — attrs → face-id → realized-face（含缓存 ANSI 字节）。
+    define-face! — 命名 face（如 font-lock-keyword-face → 蓝色加粗）。
+  face-id-for-name 和 face-id-with-overlay 接受可选 face-cache 参数。
+  merge-face-attrs 叠加基面和覆盖面。
+  依赖: platform/ansi.rkt（仅格式字符串）。
+
+render.rkt — 渲染填充
+  纯填充: layout + gap-buffer + text-props + face-cache → vbuffer。
+  render-layout! 逐 visual-line → 逐字符填充 cell:
+    1. textprop-face-at 取 face 符号
+    2. region 覆盖 → 叠加 region-face
+    3. face-id-with-overlay 解析 face-id
+    4. vbuffer-put-char! 写入 cell（\t 展开空格，#x00-#x1F 显示 ^X）
+  render-layout/region! 带选区高亮。
+  所有依赖显式传入（gb, text-props, face-cache）。
+  依赖: kernel/data (gap, query, textprop), vbuffer.rkt,
+        layout.rkt, face.rkt, char-width.rkt。
+
+
+═══════════════════════════════════════════════════════════════
+draw — 输出层（有副作用）
+═══════════════════════════════════════════════════════════════
+
+terminal.rkt — 终端输出
+  输入: vbuffer + cached-vbuffer + face-cache → 输出 ANSI 到 stdout。
+  terminal-flush! — 全量输出（首帧或尺寸变化后）。
+  terminal-flush-delta! — 行级 diff，仅输出变化行。
+  状态机: 跟踪 active-face-id 和 active-attrs，变化时输出 ANSI 转义码。
+  宽字符（display-width=2）跳过下一个 cell。
+  依赖: display/vbuffer.rkt, display/face.rkt, display/char-width.rkt,
+        platform/ansi.rkt。
+
+
+═══════════════════════════════════════════════════════════════
+platform — 平台抽象
+═══════════════════════════════════════════════════════════════
+
+ansi.rkt — ANSI 转义码常量
+  纯格式字符串: 光标控制、屏幕清除、文本属性、颜色、鼠标、bracketed paste。
+  detect-color-depth! 检测终端色彩能力（truecolor / 256 / 16 / none）。
+  依赖: 零。
+
+event.rkt — 终端输入解析
+  stdin → key-event / mouse-event。
+  解析: ASCII 可打印字符、C- 控制键、Tab/Return/Backspace、
+  ESC 序列（CSI 光标键、Home/End）、8-bit Meta、UTF-8 多字节、SGR 鼠标。
+  read-key-event! 阻塞读取一个输入事件。
+  依赖: kernel/key-event.rkt。
+
+termios.rkt — 终端控制
+  FFI 接口。screen-init! 进入 raw mode（禁用行缓冲、回显、信号），
+  screen-cleanup! 恢复原始终端设置。
+  detect-terminal-size! 通过 ioctl TIOCGWINSZ 获取行列数。
+  terminal-width / terminal-height 参数存储当前尺寸。
+  依赖: 零（仅 Racket FFI）。
+
+
+═══════════════════════════════════════════════════════════════
+文件列表 (25 files, ~3400 lines)
+═══════════════════════════════════════════════════════════════
+
+kernel/data/
+  gap.rkt            166L  字节级 gap buffer
+  marker.rkt          20L  位置标记
+  utf8.rkt            86L  UTF-8 编解码
+  query.rkt          191L  字符级查询/扫描
+  text.rkt           116L  gap + markers 原子
+  textprop.rkt       113L  区间属性 (interval-map)
+
+kernel/
+  buffer.rkt         327L  text + undo + point/mark + text-props
+  dirty.rkt          235L  buffer 包装（变更累积）
+  edit.rkt           330L  编辑命令
+  key-event.rkt      124L  输入事件类型
+  kill-ring.rkt       73L  剪切环
+  undo/record.rkt     26L  undo 数据类型
+  undo/recorder.rkt   84L  undo 录制器
+  undo/exec.rkt       58L  undo 执行
+
+lang/
+  syntax.rkt         161L  语法表
+  font-lock.rkt      321L  着色引擎
+
+display/
+  vbuffer.rkt        196L  cell 网格
+  char-width.rkt      84L  字符显示宽度
+  layout.rkt         244L  布局计算 (gb → visual-lines)
+  face.rkt           253L  样式系统
+  render.rkt         213L  渲染填充 (layout → vbuffer)
+
+draw/
+  terminal.rkt       177L  终端输出 (vbuffer → ANSI)
+
+platform/
+  ansi.rkt           114L  ANSI 转义码格式串
+  event.rkt          198L  终端输入解析
+  termios.rkt        131L  终端 raw mode 控制
