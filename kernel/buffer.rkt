@@ -7,6 +7,7 @@
 ;; orchestrated explicitly by the command loop.
 
 (require "text.rkt"
+         "textprop.rkt"
          "undo/record.rkt"
          "undo/recorder.rkt"
          "undo/exec.rkt")
@@ -14,7 +15,7 @@
 (provide
  ;; struct + constructor
  buffer? make-buffer
- buffer-name buffer-text buffer-undo-recorder
+ buffer-name buffer-text buffer-text-props buffer-undo-recorder
  buffer-point-marker buffer-mark-marker
  buffer-modified? buffer-modiff buffer-filename
  buffer-read-only? buffer-saved-modiff
@@ -29,7 +30,9 @@
  ;; queries
  buffer-length buffer-substring buffer-string
  ;; change-tracking
- buffer-change-region clear-buffer-change-region!)
+ buffer-change-region clear-buffer-change-region!
+ ;; text properties
+ buffer-face-at)
 
 ;; ============================================================
 ;; Struct
@@ -38,6 +41,7 @@
 (struct buffer
   ([name #:mutable]
    text                 ; text? — the underlying gap+markers
+   [text-props #:mutable]  ; text-properties? — faces + other metadata
    undo-recorder        ; undo-recorder? — edit history
    point-marker         ; marker? — main cursor
    [mark-marker #:mutable]  ; (or/c marker? #f) — region anchor
@@ -51,10 +55,11 @@
 
 (define (make-buffer [name "*scratch*"] [initial ""] [filename #f])
   (define tx (make-text initial))
+  (define tp (make-text-properties))
   (define pt (text-marker! tx 0 #t)) ; insertion-type = stay after inserts
   (define rec (make-undo-recorder))
   (define tracker (box #f))
-  (buffer name tx rec pt #f #f 0 filename #f 0 tracker))
+  (buffer name tx tp rec pt #f #f 0 filename #f 0 tracker))
 
 ;; ============================================================
 ;; Change-tracker helpers
@@ -86,6 +91,7 @@
   (when (positive? blen)
     (define tx (buffer-text buf))
     (text-insert! tx byte-pos bs)
+    (textprop-adjust-insert! (buffer-text-props buf) byte-pos blen)
     (recorder-record-insert! (buffer-undo-recorder buf) byte-pos
                              (+ byte-pos blen))
     (mark-modified! buf byte-pos (+ byte-pos blen))))
@@ -95,6 +101,7 @@
     (error 'buffer-delete! "buffer is read-only: ~a" (buffer-name buf)))
   (define text-str (buffer-substring buf from to))
   (text-delete! (buffer-text buf) from to)
+  (textprop-adjust-delete! (buffer-text-props buf) from to)
   (recorder-record-delete! (buffer-undo-recorder buf) text-str from)
   (mark-modified! buf from from))
 
@@ -191,6 +198,13 @@
 
 (define (deactivate-mark! buf)
   (set-buffer-mark-marker! buf #f))
+
+;; ============================================================
+;; Text properties — convenience accessor
+;; ============================================================
+
+(define (buffer-face-at buf pos)
+  (textprop-face-at (buffer-text-props buf) pos))
 
 ;; ============================================================
 ;; Queries

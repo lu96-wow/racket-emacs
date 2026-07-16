@@ -13,7 +13,7 @@
  attr-underline attr-inverse-video
 
  ;; face-attrs
- make-face-attrs face-attrs? face-attrs-props
+ make-face-attrs face-attrs? face-attrs-props face-attrs-ref
 
  ;; realized-face
  realized-face? realized-face-id realized-face-attrs
@@ -22,6 +22,19 @@
  ;; face cache
  make-face-cache face-cache? face-cache-by-id face-cache-next-id
  face-cache-lookup-or-realize!
+
+ ;; named faces
+ define-face! face-id-for-name
+
+ ;; face merging
+ merge-face-attrs face-id-with-overlay
+
+ ;; default face
+ current-default-foreground current-default-background
+ effective-default-attrs
+
+ ;; predefined face names
+ default-face region-face
 
  ;; global cache
  current-face-cache init-face-cache!)
@@ -48,6 +61,9 @@
    (for/hash ([i (in-range 0 (length kvs) 2)])
      (values (list-ref kvs i) (list-ref kvs (add1 i))))))
 
+(define (face-attrs-ref fa key [default #f])
+  (hash-ref (face-attrs-props fa) key default))
+
 ;; ============================================================
 ;; Realized face
 ;; ============================================================
@@ -56,17 +72,17 @@
 
 (define (realize-face id attrs depth)
   (define out (open-output-bytes))
-  (define fg (hash-ref (face-attrs-props attrs) attr-foreground #f))
+  (define fg (face-attrs-ref attrs attr-foreground #f))
   (when fg (display (color->ansi-fg fg depth) out))
-  (define bg (hash-ref (face-attrs-props attrs) attr-background #f))
+  (define bg (face-attrs-ref attrs attr-background #f))
   (when bg (display (color->ansi-bg bg depth) out))
-  (when (eq? (hash-ref (face-attrs-props attrs) attr-weight 'normal) 'bold)
+  (when (eq? (face-attrs-ref attrs attr-weight 'normal) 'bold)
     (display format-bold out))
-  (when (eq? (hash-ref (face-attrs-props attrs) attr-slant 'normal) 'italic)
+  (when (eq? (face-attrs-ref attrs attr-slant 'normal) 'italic)
     (display format-italic out))
-  (when (hash-ref (face-attrs-props attrs) attr-underline #f)
+  (when (face-attrs-ref attrs attr-underline #f)
     (display format-underline out))
-  (when (hash-ref (face-attrs-props attrs) attr-inverse-video #f)
+  (when (face-attrs-ref attrs attr-inverse-video #f)
     (display format-reverse out))
   (realized-face id attrs (get-output-bytes out)))
 
@@ -124,6 +140,69 @@
       (set-face-cache-next-id! fc (add1 id))
       (set-face-cache-by-id! fc (vector-append (face-cache-by-id fc) (vector rf)))
       rf)))
+
+;; ============================================================
+;; Named faces — name → face-attrs → cache → face-id
+;; ============================================================
+
+(define named-face-table (make-hash))  ; symbol → face-attrs?
+
+(define (define-face! name attrs)
+  (hash-set! named-face-table name attrs))
+
+(define (face-id-for-name name)
+  (define fc (current-face-cache))
+  (cond [(not fc) 0]
+        [(hash-has-key? named-face-table name)
+         (realized-face-id
+          (face-cache-lookup-or-realize! fc
+            (hash-ref named-face-table name)
+            (color-depth)))]
+        [else 0]))
+
+(define (face-attrs-by-name name)
+  (hash-ref named-face-table name (λ () (make-face-attrs))))
+
+;; Merging: overlay face on top of base, non-#f values override
+(define (merge-face-attrs base overlay)
+  (define base-props (face-attrs-props base))
+  (define overlay-props (face-attrs-props overlay))
+  (define merged (make-hash))
+  (for ([(k v) (in-hash base-props)]) (hash-set! merged k v))
+  (for ([(k v) (in-hash overlay-props)] #:when v) (hash-set! merged k v))
+  (face-attrs merged))
+
+(define (face-id-with-overlay base-face-name overlay-face-name)
+  (define fc (current-face-cache))
+  (and fc
+       (let* ([base-attrs (if base-face-name
+                               (face-attrs-by-name base-face-name)
+                               (effective-default-attrs))]
+              [final-attrs (if overlay-face-name
+                                (merge-face-attrs base-attrs (face-attrs-by-name overlay-face-name))
+                                base-attrs)])
+         (realized-face-id
+          (face-cache-lookup-or-realize! fc final-attrs (color-depth))))))
+
+;; Dynamic default colors
+(define current-default-foreground (make-parameter #f))
+(define current-default-background (make-parameter #f))
+
+(define (effective-default-attrs)
+  (define fg (current-default-foreground))
+  (define bg (current-default-background))
+  (if (or fg bg)
+      (apply make-face-attrs
+             (append (if fg (list attr-foreground fg) '())
+                     (if bg (list attr-background bg) '())))
+      (face-attrs-by-name default-face)))
+
+;; Predefined faces
+(define default-face 'default)
+(define region-face 'region)
+
+(define-face! default-face (make-face-attrs))
+(define-face! region-face (make-face-attrs attr-background 8))
 
 ;; ============================================================
 ;; Global face cache

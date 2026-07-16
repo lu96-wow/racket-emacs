@@ -64,6 +64,8 @@
   (define reg-active? (region-active? buf))
   (define reg-beg (and reg-active? (region-beginning buf)))
   (define reg-end (and reg-active? (region-end buf)))
+  ;; Face-id cache: (base-face . overlay) → id, avoids repeated merges
+  (define face-id-cache (make-hash))
   (define-values (c-row c-col)
     (for/fold ([cr #f] [cc #f]) ([vl (in-list vlines)] [r (in-naturals)])
       (define line-pos  (visual-line-buf-pos vl))
@@ -81,7 +83,16 @@
             (if (zero? n) p
                 (let-values ([(c len) (gap-char+len gb p)])
                   (loop2 (+ p len) (sub1 n))))))
-        (define fid (if (and reg-active? (>= char-bp reg-beg) (< char-bp reg-end)) 3 0))
+        (define fid
+          (let ([base-face (buffer-face-at buf char-bp)]
+                [overlay   (and reg-active? (>= char-bp reg-beg) (< char-bp reg-end)
+                                region-face)])
+            (if (or base-face overlay)
+                (let ([key (cons base-face overlay)])
+                  (or (hash-ref! face-id-cache key
+                        (λ () (face-id-with-overlay base-face overlay)))
+                      0))
+                0)))
         (vbuffer-put-char! vb r col ch #:face-id fid)
         (+ col cw))
       (when (visual-line-truncated? vl) (vbuffer-put-char! vb r (sub1 cols) #\$))
