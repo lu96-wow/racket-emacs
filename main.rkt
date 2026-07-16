@@ -22,7 +22,9 @@
          "api/editing.rkt"
          "api/keymap.rkt"
          "api/mode.rkt"
-         "api/bindings.rkt")
+         "api/bindings.rkt"
+         "base/font-lock.rkt"
+         "api/lang/racket-lang.rkt")
 
 (define welcome-text
   (string-append
@@ -71,7 +73,9 @@
        ((command-fn cmd) lf frm evt)
        (define buf* (and lf (leaf-buffer lf)))
        (when (and buf* (command-modifies? cmd))
-         (recorder-commit! (buffer-undo-recorder buf*))))
+         (recorder-commit! (buffer-undo-recorder buf*))
+         (fontify-after-change! buf*)
+         (clear-buffer-change-region! buf*)))
      ((unbox render-slot) frm)
      (event-loop)]))
 
@@ -111,10 +115,13 @@
     (define racket-km (make-keymap))
     (register-mode! (editor-mode 'racket racket-km ".rkt"))
 
+    (define-racket-font-lock-faces!)
+
     (define main-buf (get-buffer-create "*scratch*"))
     (buffer-insert! main-buf welcome-text 0)
     (set-buffer-point! main-buf 0)
     (init-buffer-with-filename! main-buf "*scratch*.rkt")
+    (setup-racket-lang! main-buf)
 
     (init-frame main-buf (terminal-width) (terminal-height))
     ((unbox render-slot) (current-frame))
