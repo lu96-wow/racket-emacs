@@ -73,11 +73,11 @@
 
     [else
      ;; ── Dispatch ──
+     (define win (selected-window))
+     (define frm (current-frame))
      (define buf (and win (window-buffer win)))
      (define cmd (or (and buf (lookup-key buf evt))
                      (and (self-insert-key? evt) cmd-self-insert)))
-     (define win (selected-window))
-     (define frm (current-frame))
      (when cmd
        ((command-fn cmd) win frm evt)
        ;; Commit buffer undo boundary after modifying commands
