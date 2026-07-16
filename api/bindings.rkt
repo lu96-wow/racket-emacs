@@ -2,24 +2,17 @@
 
 ;; api/bindings.rkt — Default global key bindings
 ;;
-;; Populates the global keymap with standard Emacs-like bindings.
-;; Individual buffers can override these via set-buffer-keymap!.
+;; init-global-keymap! populates the global keymap with
+;; standard Emacs-like bindings.
 
-(require "keymap.rkt"
+(require "key.rkt"
+         "keymap.rkt"
          "command.rkt"
          "navigation.rkt"
          "editing.rkt"
          "window-ops.rkt")
 
-(provide
- ;; populate
- init-global-keymap!
- ;; re-export keymap API
- (all-from-out "keymap.rkt"))
-
-;; ============================================================
-;; init-global-keymap! — called once at startup
-;; ============================================================
+(provide init-global-keymap!)
 
 (define (init-global-keymap!)
   ;; Navigation

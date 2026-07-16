@@ -20,11 +20,9 @@
          "display/registry.rkt"
          "display/face.rkt"
          "api/command.rkt"
+         "api/editing.rkt"
          "api/keymap.rkt"
          "api/mode.rkt"
-         "api/navigation.rkt"
-         "api/editing.rkt"
-         "api/window-ops.rkt"
          "api/bindings.rkt")
 
 ;; ============================================================
