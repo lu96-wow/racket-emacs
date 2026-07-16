@@ -136,14 +136,18 @@
       #f))
 
 (define (restore-point-after-undo! buf group)
-  ;; Put point at the beginning of the first record's affected range.
+  ;; Place point at the end of the restored range.
+  ;; For undo-delete: after the re-inserted text.
+  ;; For undo-insert: at the beginning (where text was removed).
   (define records (undo-group-records group))
   (when (pair? records)
     (define first (car records))
     (cond [(undo-insert? first)
            (set-buffer-point! buf (undo-insert-beg first))]
           [(undo-delete? first)
-           (set-buffer-point! buf (undo-delete-beg first))])))
+           (define text (undo-delete-text first))
+           (define blen (bytes-length (string->bytes/utf-8 text)))
+           (set-buffer-point! buf (+ (undo-delete-beg first) blen))])))
 
 ;; ============================================================
 ;; Point
