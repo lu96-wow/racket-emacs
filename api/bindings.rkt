@@ -1,9 +1,6 @@
 #lang racket
 
 ;; api/bindings.rkt — Default global key bindings
-;;
-;; init-global-keymap! populates the global keymap with
-;; standard Emacs-like bindings.
 
 (require "key.rkt"
          "keymap.rkt"
@@ -39,16 +36,9 @@
   ;; Undo/Redo
   (keymap-set! global-keymap (key 'ctrl #\_)          cmd-undo)
   (keymap-set! global-keymap (key 'ctrl #\r)          cmd-redo)
-
-  ;; ── C-x prefix keymap ──
-  (define ctrl-x-map (make-keymap))
-  (keymap-set! ctrl-x-map (key 'char #\o)       cmd-other-window)
-  (keymap-set! ctrl-x-map (key 'char #\2)       cmd-split-window-below)
-  (keymap-set! ctrl-x-map (key 'char #\3)       cmd-split-window-right)
-  (keymap-set! ctrl-x-map (key 'char #\0)       cmd-delete-window)
-  (keymap-set! ctrl-x-map (key 'char #\1)       cmd-delete-other-windows)
-  (keymap-set! ctrl-x-map (key 'char #\^)       cmd-enlarge-window)
-  (keymap-set! ctrl-x-map (key 'char #\{) cmd-shrink-window-horizontally)
-  (keymap-set! ctrl-x-map (key 'char #\}) cmd-enlarge-window-horizontally)
-  (keymap-set! ctrl-x-map (key 'char #\+)       cmd-balance-windows)
-  (keymap-set! global-keymap (key 'ctrl #\x)    ctrl-x-map))
+  ;; Window
+  (keymap-set! global-keymap (key 'ctrl #\o)          cmd-other-window)
+  (keymap-set! global-keymap (key 'ctrl #\2)          cmd-split-window-below)
+  (keymap-set! global-keymap (key 'ctrl #\3)          cmd-split-window-right)
+  (keymap-set! global-keymap (key 'ctrl #\0)          cmd-delete-window)
+  (keymap-set! global-keymap (key 'ctrl #\1)          cmd-delete-other-windows))

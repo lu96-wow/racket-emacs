@@ -1,186 +1,135 @@
 #lang racket
 
-;; display/window.rkt — Window & frame primitives
+;; display/window.rkt — Window tree + layout
 ;;
-;; Window tree + frame = the view layer.  Each leaf window displays
-;; a buffer.  Internal windows split space into children.
-;; Adapted from protocol/window.rkt to use rebuild kernel/buffer API.
+;; Three layers, cleanly separated:
+;;   1. Data — tree types (leaf, split) + frame container
+;;   2. Pure calc — layout-calc, focus-list, window-at
+;;   3. Apply — layout-frame! (calc + write geometry), tree ops
+;;
+;; Geometry lives in frame, NOT in nodes.  Layout is a pure function
+;; tree × w × h → (listof (cons node rect)).  Users replace functions,
+;; not register hooks.
 
 (require "../kernel/buffer.rkt"
          "../kernel/text.rkt"
          "../kernel/gap/marker.rkt")
 
 (provide
- ;; window
- window? window-parent window-children window-horizontal?
- window-top window-left window-rows window-cols
- window-hscroll set-window-hscroll!
- window-buffer set-window-buffer! window-start window-pointm window-selected?
- set-window-parent! set-window-children! set-window-horizontal?!
- set-window-top! set-window-left! set-window-rows! set-window-cols!
- set-window-start! set-window-pointm!
- set-window-selected?!
- window-desired-ratio set-window-desired-ratio!
- window-params set-window-params!
+ ;; ── types ──
+ leaf? leaf leaf-buffer leaf-start leaf-pointm leaf-hscroll
+ split? split split-direction split-children
+ frame? frame-tree frame-geometry frame-selected frame-width frame-height
+ set-leaf-buffer! set-leaf-start! set-leaf-pointm! set-leaf-hscroll!
+ set-split-children!
+ set-frame-geometry! set-frame-selected! set-frame-width! set-frame-height!
+ set-frame-tree!
 
- ;; frame
- frame? frame-root-window frame-selected-window
- frame-width frame-height
- set-frame-root-window! set-frame-selected-window!
- set-frame-width! set-frame-height!
+ ;; ── constructors ──
+ make-leaf
+ init-frame
 
- ;; query
- window-leaf? window-live-p
- frame-window-list
- selected-window current-frame
+ ;; ── pure calc ──
+ layout-calc focus-list window-at
+ rect-top rect-left rect-rows rect-cols
+ next-leaf prev-leaf
 
- ;; create
- make-leaf-window make-internal-window
- init-root-frame
+ ;; ── apply ──
+ layout-frame!
+ split-leaf! delete-leaf! set-leaf-buffer-in-tree!
 
- ;; layout
- layout-frame! split-window! delete-window!
- window-desired-rows set-window-desired-rows!
+ ;; ── query ──
+ leaf-geometry leaf-selected?
+ frame-leaf-list selected-leaf current-frame
 
- ;; utility
- other-visible-window balance-windows!
-
- ;; point
- window-point set-window-point!)
+ ;; ── point ──
+ leaf-point set-leaf-point!)
 
 ;; ============================================================
-;; Window
+;; Types
 ;; ============================================================
 
-(struct window
-  ([parent #:mutable] [children #:mutable] [horizontal? #:mutable]
-   [top #:mutable] [left #:mutable] [rows #:mutable] [cols #:mutable]
-   [buffer #:mutable] [start #:mutable] [pointm #:mutable] [hscroll #:mutable]
-   [selected? #:mutable]
-   [desired-ratio #:mutable]  ; #f = equal share, number = fraction of parent
-   [params #:mutable])         ; hasheq — user key-value store
+;; Leaf — a buffer window.  Geometry is extrinsic (in frame-geometry).
+(struct leaf
+  ([buffer #:mutable]   ; buffer?
+   [start #:mutable]    ; marker? — scroll anchor
+   [pointm #:mutable]   ; marker? — cursor
+   [hscroll #:mutable]) ; integer
   #:transparent)
 
-;; ============================================================
-;; Frame
-;; ============================================================
+;; Split — divides space among children.
+;; direction: 'horizontal (left→right) or 'vertical (top→bottom)
+(struct split
+  (direction            ; 'horizontal | 'vertical
+   [children #:mutable]); (listof (or/c leaf? split?))
+  #:transparent)
 
+;; rect — computed geometry: (vector top left rows cols)
+(define (rect-top r)    (vector-ref r 0))
+(define (rect-left r)   (vector-ref r 1))
+(define (rect-rows r)   (vector-ref r 2))
+(define (rect-cols r)   (vector-ref r 3))
+(define (make-rect t l r c) (vector t l r c))
+
+;; Frame — ties tree + geometry + focus + dimensions
 (struct frame
-  ([root-window #:mutable]
-   [selected-window #:mutable] [width #:mutable] [height #:mutable])
+  ([tree #:mutable]      ; (or/c leaf? split?)
+   [geometry #:mutable]  ; (hash leaf? rect)
+   [selected #:mutable]  ; leaf?
+   [width #:mutable]     ; integer
+   [height #:mutable])   ; integer
   #:transparent)
-
-;; ============================================================
-;; Queries
-;; ============================================================
-
-(define (window-leaf? w) (and (null? (window-children w)) (buffer? (window-buffer w))))
-(define (window-live-p w) (window-leaf? w))
-
-(define (frame-window-list frm)
-  (define acc '())
-  (let dfs ([w (frame-root-window frm)])
-    (when w
-      (if (window-leaf? w)
-          (set! acc (cons w acc))
-          (for ([child (in-list (window-children w))]) (dfs child)))))
-  (reverse acc))
-
-(define current-frame (make-parameter #f))
-(define (selected-window) (define frm (current-frame)) (and frm (frame-selected-window frm)))
 
 ;; ============================================================
 ;; Constructors
 ;; ============================================================
 
-(define (make-leaf-window buf)
+(define (make-leaf buf)
   (define tx (buffer-text buf))
-  (define start-m (text-marker! tx 0 #f))
-  ;; Use buffer's point marker; set initial position to buffer point
-  (define pt-m (buffer-point-marker buf))
-  (window #f '() #f 0 0 0 0 buf start-m pt-m 0 #f #f (make-hasheq)))
+  (leaf buf
+        (text-marker! tx 0 #f)       ; start
+        (buffer-point-marker buf)    ; pointm
+        0))                           ; hscroll
 
-(define (make-internal-window horizontal?)
-  (window #f '() horizontal? 0 0 0 0 #f #f #f 0 #f #f (make-hasheq)))
-;; ============================================================
-;; ============================================================
-;; Window tree operations
-;; ============================================================
-
-;; split-window! — split an existing leaf window, returning the new window
-;; horizontal? = #f → vertical split (new window below)
-;; horizontal? = #t → horizontal split (new window to the right)
-(define (split-window! w buf horizontal?)
-  (unless (window-leaf? w)
-    (error 'split-window! "can only split a leaf window"))
-  (define new-win (make-leaf-window buf))
-  (define internal (make-internal-window horizontal?))
-  (set-window-children! internal (list w new-win))
-  (define parent (window-parent w))
-  (define siblings (and parent (window-children parent)))
-  (if parent
-      (let ([idx (index-of siblings w)])
-        (set-window-children! parent (list-update siblings idx internal))
-        (set-window-parent! internal parent)
-        (set-window-parent! w internal)
-        (set-window-parent! new-win internal))
-      ;; w is the root — replace frame root
-      (begin
-        (set-frame-root-window! (current-frame) internal)
-        (set-window-parent! w internal)
-        (set-window-parent! new-win internal)))
-  (layout-frame! (current-frame))
-  new-win)
-
-;; delete-window! — delete a window, giving its space to siblings
-(define (delete-window! w [frm (current-frame)])
-  (define parent (window-parent w))
-  (unless parent (error 'delete-window! "cannot delete sole window"))
-  (define siblings (window-children parent))
-  (define remaining (remq w siblings))
-  (cond [(null? remaining)
-         (error 'delete-window! "internal error: no siblings")]
-        [(null? (cdr remaining))
-         ;; Only one sibling left — collapse the internal node
-         (define only-sib (car remaining))
-         (define grandparent (window-parent parent))
-         (if grandparent
-             (let* ([gp-children (window-children grandparent)]
-                    [p-idx (index-of gp-children parent)])
-               (set-window-children! grandparent
-                 (list-update gp-children p-idx only-sib))
-               (set-window-parent! only-sib grandparent))
-             ;; parent was root — promote only-sib to root
-             (begin
-               (set-frame-root-window! frm only-sib)
-               (set-window-parent! only-sib #f)))]
-        [else
-         ;; More than one sibling — just remove w
-         (set-window-children! parent remaining)])
-  (layout-frame! frm))
-
-;; other-visible-window — return any visible window other than the selected one
-(define (other-visible-window [frm (current-frame)])
-  (define sel (selected-window))
-  (for/or ([w (in-list (frame-window-list frm))])
-    (and (not (eq? w sel)) w)))
-
-;; balance-windows! — reset all desired-ratio to #f (equal splits)
-(define (balance-windows! [frm (current-frame)])
-  (let dfs ([w (frame-root-window frm)])
-    (when w
-      (cond [(null? (window-children w))
-             (set-window-desired-ratio! w #f)]
-            [else
-             (set-window-desired-ratio! w #f)
-             (for ([child (in-list (window-children w))])
-               (set-window-desired-ratio! child #f)
-               (dfs child))])))
-  (layout-frame! frm))
+(define (init-frame buf width height)
+  (define root (make-leaf buf))
+  (define frm (frame root (make-hash) root width height))
+  (layout-frame! frm)
+  (current-frame frm)
+  frm)
 
 ;; ============================================================
-;; Helpers
+;; Global frame parameter
 ;; ============================================================
+
+(define current-frame (make-parameter #f))
+(define (selected-leaf) (define frm (current-frame)) (and frm (frame-selected frm)))
+
+;; ============================================================
+;; Pure: focus-list — DFS left-to-right leaf order
+;; ============================================================
+
+(define (focus-list tree)
+  (let dfs ([t tree])
+    (match t
+      [(? leaf?) (list t)]
+      [(split _ children) (append-map dfs children)])))
+
+;; ============================================================
+;; Pure: next-leaf / prev-leaf — cyclic
+;; ============================================================
+
+(define (next-leaf frm)
+  (define leaves (focus-list (frame-tree frm)))
+  (define sel (frame-selected frm))
+  (define idx (or (index-of leaves sel) 0))
+  (list-ref leaves (modulo (add1 idx) (length leaves))))
+
+(define (prev-leaf frm)
+  (define leaves (focus-list (frame-tree frm)))
+  (define sel (frame-selected frm))
+  (define idx (or (index-of leaves sel) 0))
+  (list-ref leaves (modulo (sub1 idx) (length leaves))))
 
 (define (index-of lst item)
   (let loop ([xs lst] [i 0])
@@ -188,95 +137,138 @@
           [(eq? (car xs) item) i]
           [else (loop (cdr xs) (add1 i))])))
 
-(define (list-update lst idx new)
-  (append (take lst idx) (list new) (drop lst (add1 idx))))
-
 ;; ============================================================
-;; Point — get/set point for a window via its buffer's marker
+;; Pure: layout-calc
+;;   tree × width × height → (listof (cons leaf? rect))
 ;; ============================================================
 
-(define (window-point w)
-  (define tx (and (window-buffer w) (buffer-text (window-buffer w))))
-  (define pm (window-pointm w))
+(define (layout-calc tree width height)
+  (let loop ([t tree] [top 0] [left 0] [rows height] [cols width])
+    (match t
+      [(? leaf?)
+       (list (cons t (make-rect top left rows cols)))]
+      [(split dir children)
+       (define n (length children))
+       (if (zero? n)
+           '()
+           (if (eq? dir 'horizontal)
+               (let sub ([cs children] [l left] [acc '()])
+                 (if (null? cs)
+                     (reverse acc)
+                     (let* ([c (car cs)]
+                            [c-cols (max 1 (quotient (- cols (- l left)) (length cs)))]
+                            [result (loop c top l rows c-cols)])
+                       (sub (cdr cs) (+ l c-cols) (append result acc)))))
+               (let sub ([cs children] [t top] [acc '()])
+                 (if (null? cs)
+                     (reverse acc)
+                     (let* ([c (car cs)]
+                            [c-rows (max 1 (quotient (- rows (- t top)) (length cs)))]
+                            [result (loop c t left c-rows cols)])
+                       (sub (cdr cs) (+ t c-rows) (append result acc)))))))])))
+
+;; ============================================================
+;; Pure: window-at — which leaf contains (y, x)?
+;; ============================================================
+
+(define (window-at geo y x)
+  (for/or ([(lf rect) (in-hash geo)])
+    (and (<= (rect-top rect) y (+ (rect-top rect) (rect-rows rect) -1))
+         (<= (rect-left rect) x (+ (rect-left rect) (rect-cols rect) -1))
+         lf)))
+
+;; ============================================================
+;; Apply: layout-frame! — calc + write geometry
+;; ============================================================
+
+(define (layout-frame! frm)
+  (define rects (layout-calc (frame-tree frm) (frame-width frm) (frame-height frm)))
+  (define geo (make-hash))
+  (for ([p (in-list rects)])
+    (hash-set! geo (car p) (cdr p)))
+  (set-frame-geometry! frm geo)
+  ;; Ensure selected leaf is still in tree
+  (define leaves (focus-list (frame-tree frm)))
+  (unless (and (frame-selected frm) (memq (frame-selected frm) leaves))
+    (when (pair? leaves)
+      (set-frame-selected! frm (car leaves))))
+  frm)
+
+;; ============================================================
+;; Query helpers
+;; ============================================================
+
+(define (leaf-geometry frm lf)
+  (hash-ref (frame-geometry frm) lf (λ () #f)))
+
+(define (leaf-selected? frm lf)
+  (eq? lf (frame-selected frm)))
+
+(define (frame-leaf-list frm)
+  (focus-list (frame-tree frm)))
+
+;; ============================================================
+;; Point helpers
+;; ============================================================
+
+(define (leaf-point lf)
+  (define buf (leaf-buffer lf))
+  (define tx (and buf (buffer-text buf)))
+  (define pm (leaf-pointm lf))
   (if (and tx pm) (text-marker-pos tx pm) 0))
 
-(define (set-window-point! w pos)
-  (define tx (and (window-buffer w) (buffer-text (window-buffer w))))
-  (define pm (window-pointm w))
+(define (set-leaf-point! lf pos)
+  (define tx (and (leaf-buffer lf) (buffer-text (leaf-buffer lf))))
+  (define pm (leaf-pointm lf))
   (when (and tx pm) (text-set-marker-pos! tx pm pos)))
 
 ;; ============================================================
-;; Layout
+;; Tree operations (pure → then apply)
 ;; ============================================================
 
-(define window-desired-rows-table (make-hasheq))
-(define (window-desired-rows w) (hash-ref window-desired-rows-table w (λ () 1)))
-(define (set-window-desired-rows! w rows) (hash-set! window-desired-rows-table w rows))
+;; replace-in-tree : tree old-node new-node → tree
+(define (replace-in-tree tree target replacement)
+  (cond [(eq? tree target) replacement]
+        [(split? tree)
+         (split (split-direction tree)
+                (map (λ (c) (replace-in-tree c target replacement))
+                     (split-children tree)))]
+        [else tree]))
 
-(define (init-root-frame buf width height)
-  (define root (make-leaf-window buf))
-  (set-window-selected?! root #t)
-  (define frm (frame root root width height))
+;; remove-from-tree : tree target → tree
+(define (remove-from-tree tree target)
+  (match tree
+    [(? leaf?) (if (eq? tree target) 'removed tree)]
+    [(split dir children)
+     (define new-children
+       (filter (λ (c) (not (eq? c 'removed)))
+               (map (λ (c) (remove-from-tree c target)) children)))
+     (match new-children
+       ['() 'removed]
+       [(list only) only]  ; collapse single-child split
+       [_ (split dir new-children)])]))
+
+;; split-leaf! : frame leaf buffer direction → leaf
+;; direction: 'vertical (new below) or 'horizontal (new right)
+(define (split-leaf! frm lf buf direction)
+  (define new (make-leaf buf))
+  (define inner (split direction (list lf new)))
+  (set-frame-tree! frm (replace-in-tree (frame-tree frm) lf inner))
   (layout-frame! frm)
-  (current-frame frm)
-  frm)
+  new)
 
-(define (layout-frame! frm)
-  (define fw (frame-width frm)) (define fh (frame-height frm))
-  (layout-subtree! (frame-root-window frm) 0 0 fh fw))
+;; delete-leaf! : frame leaf → void
+(define (delete-leaf! frm lf)
+  (define new-tree (remove-from-tree (frame-tree frm) lf))
+  (when (leaf? new-tree)
+    (set! new-tree (split 'vertical (list new-tree)))) ; never rootless
+  (set-frame-tree! frm new-tree)
+  (layout-frame! frm))
 
-(define (layout-subtree! w top left rows cols)
-  (set-window-top! w top) (set-window-left! w left)
-  (set-window-rows! w rows) (set-window-cols! w cols)
-  (define children (window-children w))
-  (unless (null? children)
-    (define ratios (compute-ratios children))
-    (if (window-horizontal? w)
-        (let loop ([cs children] [rs ratios] [l left])
-          (unless (null? cs)
-            (let* ([child-cols (max 1 (exact-round (* cols (car rs))))]
-                   [remaining-cols (- cols child-cols)]
-                   [rest-ratio-sum (- 1.0 (car rs))])
-              ;; Re-normalize remaining ratios for remaining children
-              (define norm-rest (if (> (length (cdr cs)) 0)
-                                   (map (λ (r) (if (> rest-ratio-sum 0)
-                                                    (/ r rest-ratio-sum)
-                                                    (/ 1.0 (length (cdr cs)))))
-                                        (cdr rs))
-                                   '()))
-              (layout-subtree! (car cs) top l rows child-cols)
-              (loop (cdr cs) norm-rest (+ l child-cols)))))
-        (let loop ([cs children] [rs ratios] [t top])
-          (unless (null? cs)
-            (let* ([child-rows (max 1 (exact-round (* rows (car rs))))]
-                   [remaining-rows (- rows child-rows)]
-                   [rest-ratio-sum (- 1.0 (car rs))])
-              (define norm-rest (if (> (length (cdr cs)) 0)
-                                   (map (λ (r) (if (> rest-ratio-sum 0)
-                                                    (/ r rest-ratio-sum)
-                                                    (/ 1.0 (length (cdr cs)))))
-                                        (cdr rs))
-                                   '()))
-              (layout-subtree! (car cs) t left child-rows cols)
-              (loop (cdr cs) norm-rest (+ t child-rows))))))))
-
-;; compute-ratios — resolve desired-ratio → normalized fractions
-(define (compute-ratios children)
-  (define explicit
-    (for/list ([c (in-list children)])
-      (window-desired-ratio c)))
-  (define sum-explicit (for/sum ([r (in-list explicit)] #:when r) r))
-  (cond
-    ;; All explicit, sum to 1.0 — use as-is
-    [(and (> sum-explicit 0) (andmap values explicit) (<= (abs (- sum-explicit 1.0)) 0.001))
-     explicit]
-    ;; Partial explicit — remaining children share rest equally
-    [(> sum-explicit 0)
-     (define unspecified-count (count (λ (r) (not r)) explicit))
-     (define rest (/ (- 1.0 sum-explicit) unspecified-count))
-     (for/list ([r (in-list explicit)])
-       (or r rest))]
-    ;; No explicit ratios — equal split
-    [else
-     (define n (length children))
-     (for/list ([c (in-list children)]) (/ 1.0 n))]))
+;; set-leaf-buffer-in-tree! : frame leaf buffer → void
+(define (set-leaf-buffer-in-tree! frm lf buf)
+  (set-leaf-buffer! lf buf)
+  (define tx (buffer-text buf))
+  (set-leaf-start! lf (text-marker! tx 0 #f))
+  (set-leaf-pointm! lf (buffer-point-marker buf))
+  (set-leaf-hscroll! lf 0))

@@ -1,0 +1,1 @@
+("9.2" ta6le ("126cbf4aed27dd2655f428a5e68d03bce094d430" . "1ca342c206de4779e012afafe090a6393ec404e3") #"/home/lu96/work/editer/racket-emacs-rebuild/display/../platform/ansi.rkt" (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt") (indirect collects #"racket" #"match" #"gen-match.rkt") (indirect collects #"racket" #"match" #"parse.rkt"))

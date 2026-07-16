@@ -2,10 +2,8 @@
 
 ;; display/render.rkt — Window rendering pipeline
 ;;
-;; For each leaf window: layout → fill vbuffer → compose into frame.
-;; Incremental: diff frame vbuffer against cache, flush only changed rows.
-;;
-;; Dependencies: layout, flush, window, mouse, kernel/*, platform/*
+;; For each leaf: layout (already computed) → fill vbuffer → compose.
+;; Incremental diff against cache, flush only changed rows.
 
 (require "../kernel/buffer.rkt"
          "../kernel/text.rkt"
@@ -33,50 +31,36 @@
  (all-from-out "mouse.rkt"))
 
 ;; ============================================================
-;; Minimum window size + render slot
+;; Minimum size
 ;; ============================================================
-;; When the frame is too small, swap render-slot to a "window too
-;; small" warning so the hot path avoids an (if) on every frame.
 
 (define MIN-ROWS 4)
 (define MIN-COLS 15)
-
-;; Dirty flag: set on resize, cleared after full redraw with clear-screen
 (define frame-dirty? (make-hasheq))
-
 (define render-slot (box #f))
 
 (define (render-too-small frm)
   (detect-terminal-size!)
-  (define w (frame-width frm))
-  (define h (frame-height frm))
+  (define w (frame-width frm)) (define h (frame-height frm))
   (display format-cursor-hide)
   (define msg "window too small")
-  (define pad (max 0 (quotient (- w (string-length msg)) 2)))
   (hash-remove! frame-dirty? frm)
   (display format-clear-screen)
   (when (and (>= h 1) (>= w (string-length msg)))
     (display (format-cursor-move (quotient h 2) 0))
-    (display (make-string pad #\space))
-    (display format-reverse)
-    (display msg)
-    (display format-reset))
-  (display format-cursor-show)
-  (flush-output))
+    (display (make-string (max 0 (quotient (- w (string-length msg)) 2)) #\space))
+    (display format-reverse) (display msg) (display format-reset))
+  (display format-cursor-show) (flush-output))
 
-(define (check-min-size! render-slot frm)
-  (define w (frame-width frm))
-  (define h (frame-height frm))
-  (set-box! render-slot
-    (if (and (>= w MIN-COLS) (>= h MIN-ROWS))
-        display-frame
-        render-too-small)))
+(define (check-min-size! box frm)
+  (set-box! box (if (and (>= (frame-width frm) MIN-COLS) (>= (frame-height frm) MIN-ROWS))
+                    display-frame render-too-small)))
 
 ;; ============================================================
-;; render-visual-lines! — fill vbuffer from visual lines + find cursor
+;; render-visual-lines!
 ;; ============================================================
 
-(define (render-visual-lines! vb buf gb vlines pt-pos cols content-rows)
+(define (render-visual-lines! vb buf gb vlines pt-pos cols)
   (define reg-active? (region-active? buf))
   (define reg-beg (and reg-active? (region-beginning buf)))
   (define reg-end (and reg-active? (region-end buf)))
@@ -97,81 +81,75 @@
             (if (zero? n) p
                 (let-values ([(c len) (gap-char+len gb p)])
                   (loop2 (+ p len) (sub1 n))))))
-        (define fid
-          (if (and reg-active? (>= char-bp reg-beg) (< char-bp reg-end)) 3 0))
+        (define fid (if (and reg-active? (>= char-bp reg-beg) (< char-bp reg-end)) 3 0))
         (vbuffer-put-char! vb r col ch #:face-id fid)
         (+ col cw))
-      (when (visual-line-truncated? vl)
-        (vbuffer-put-char! vb r (sub1 cols) #\$))
+      (when (visual-line-truncated? vl) (vbuffer-put-char! vb r (sub1 cols) #\$))
       (if (and (>= pt-pos line-pos) (<= pt-pos (+ line-pos char-len)))
           (values r (gap-display-width gb line-pos pt-pos))
           (values cr cc))))
-  (if c-row
-      (values c-row c-col)
-      ;; Cursor past visible content: place at end of last visible line
-      (let ([rev-lines (reverse vlines)])
-        (if (null? rev-lines)
-            (values 0 0)
-            (let ([last-vl (car rev-lines)])
-              (values (sub1 (length vlines))
-                      (visual-line-display-len last-vl)))))))
+  (if c-row (values c-row c-col)
+      (let ([rev (reverse vlines)])
+        (if (null? rev) (values 0 0)
+            (let ([lv (car rev)])
+              (values (sub1 (length vlines)) (visual-line-display-len lv)))))))
 
 ;; ============================================================
-;; render-window!
+;; render-leaf! — fill vbuffer for one leaf
 ;; ============================================================
 
-(define (render-window! w [force-cursor? #f])
-  (define buf (window-buffer w))
-  (unless buf (error 'render-window! "window has no buffer"))
-  (define rows (window-rows w))
-  (define cols (window-cols w))
+(define (render-leaf! lf rows cols selected?)
+  (define buf (leaf-buffer lf))
+  (unless buf (error 'render-leaf! "leaf has no buffer"))
   (when (or (zero? rows) (zero? cols))
     (values (make-vbuffer 1 1) #f #f))
-  (define tx  (buffer-text buf))
-  (define gb  (text-gap tx))
-  (define start-pos (if (window-start w) (text-marker-pos tx (window-start w)) 0))
-  (define pt-pos    (if (window-selected? w) (buffer-point buf) (window-point w)))
-  (define left-col (window-hscroll w))
+  (define tx (buffer-text buf))
+  (define gb (text-gap tx))
+  (define start-pos (if (leaf-start lf) (text-marker-pos tx (leaf-start lf)) 0))
+  (define pt-pos (if selected? (buffer-point buf) (leaf-point lf)))
+  (define left-col (leaf-hscroll lf))
   (define wrap-mode (if (truncate-lines? buf) 'none 'char))
   (define vb (make-vbuffer rows cols))
   (define-values (c-row c-col)
     (if (> rows 0)
         (let* ([vlines (visual-line-lines gb start-pos rows cols
                                           #:wrap-mode wrap-mode #:left-col left-col)])
-          (render-visual-lines! vb buf gb vlines pt-pos cols rows))
+          (render-visual-lines! vb buf gb vlines pt-pos cols))
         (values #f #f)))
   (values vb
-          (and (or force-cursor? (window-selected? w)) c-row)
-          (and (or force-cursor? (window-selected? w)) c-col)))
+          (and selected? c-row)
+          (and selected? c-col)))
 
 ;; ============================================================
 ;; compose-frame!
 ;; ============================================================
 
 (define (compose-frame! frm)
-  (define fw (frame-width frm))
-  (define fh (frame-height frm))
+  (define fw (frame-width frm)) (define fh (frame-height frm))
   (define final-vb (make-vbuffer fh fw))
-  (define leaves (frame-window-list frm))
+  (define geo (frame-geometry frm))
+  (define sel (frame-selected frm))
   (define-values (cur-row cur-col)
-    (for/fold ([cr #f] [cc #f]) ([w (in-list leaves)])
-      (let-values ([(sub-vb sr sc) (render-window! w)])
-        (vbuffer-blit! final-vb (window-top w) (window-left w) sub-vb)
-        (if (and (window-selected? w) sr sc)
-            (values (+ (window-top w) sr) (+ (window-left w) sc))
+    (for/fold ([cr #f] [cc #f]) ([(lf rect) (in-hash geo)])
+      (let*-values ([(top left rows cols)
+                     (values (rect-top rect) (rect-left rect)
+                             (rect-rows rect) (rect-cols rect))]
+                    [(sub-vb sr sc) (render-leaf! lf rows cols (eq? lf sel))])
+        (vbuffer-blit! final-vb top left sub-vb)
+        (if (and sr sc (eq? lf sel))
+            (values (+ top sr) (+ left sc))
             (values cr cc)))))
   (values final-vb cur-row cur-col))
 
 ;; ============================================================
-;; recenter-point! — auto-scroll window to keep point visible
+;; recenter-point!
 ;; ============================================================
 
 (define (end-of-physical-lines gb start n)
   (define len (gap-length gb))
   (define (nl? b) (= b #x0A))
   (let loop ([pos start] [remaining n])
-    (if (or (zero? remaining) (>= pos len))
-        pos
+    (if (or (zero? remaining) (>= pos len)) pos
         (let ([nl (gap-scan-byte gb pos 'forward nl?)])
           (if (>= nl len) len (loop (add1 nl) (sub1 remaining)))))))
 
@@ -183,67 +161,51 @@
           (if (< nl 0) 0
               (if (zero? remaining) (add1 nl) (loop nl (sub1 remaining))))))))
 
-(define (recenter-point! w)
-  (define buf (window-buffer w))
-  (define tx  (buffer-text buf))
-  (define gb  (text-gap tx))
+(define (recenter-point! lf rect selected?)
+  (define buf (leaf-buffer lf))
+  (define tx (buffer-text buf))
+  (define gb (text-gap tx))
   (define len (gap-length gb))
-  (define pt (if (window-selected? w) (buffer-point buf) (window-point w)))
-  (define ws (text-marker-pos tx (window-start w)))
-  (define rows (max 1 (window-rows w)))
-  (define cols (window-cols w))
+  (define pt (if selected? (buffer-point buf) (leaf-point lf)))
+  (define ws (text-marker-pos tx (leaf-start lf)))
+  (define rows (max 1 (rect-rows rect)))
+  (define cols (rect-cols rect))
   (define last-buf-pos
     (if (truncate-lines? buf)
         (end-of-physical-lines gb ws rows)
-        (let ([vlines (visual-line-lines gb ws rows cols
-                                         #:wrap-mode 'char #:left-col 0)])
+        (let ([vlines (visual-line-lines gb ws rows cols #:wrap-mode 'char #:left-col 0)])
           (if (null? vlines) ws
               (let* ([lv (last vlines)])
-                (+ (visual-line-buf-pos lv)
-                   (string-length (visual-line-content lv))))))))
-  (cond
-    [(< pt ws)
-     (define nl (gap-scan-byte gb pt 'backward (λ (b) (= b #x0A))))
-     (text-set-marker-pos! tx (window-start w) (if (>= nl 0) (add1 nl) 0))
-     (when (> (window-hscroll w) 0) (set-window-hscroll! w 0))]
-    [(> pt last-buf-pos)
-     (define target-lines (max 1 (quotient (* rows 2) 3)))
-     (text-set-marker-pos! tx (window-start w)
-                           (beginning-of-nth-prev-line gb pt target-lines))
-     (when (> (window-hscroll w) 0) (set-window-hscroll! w 0))]
-    [else (void)])
-  (when (and (window-selected? w) (truncate-lines? buf))
+                (+ (visual-line-buf-pos lv) (string-length (visual-line-content lv))))))))
+  (cond [(< pt ws)
+         (define nl (gap-scan-byte gb pt 'backward (λ (b) (= b #x0A))))
+         (text-set-marker-pos! tx (leaf-start lf) (if (>= nl 0) (add1 nl) 0))
+         (when (> (leaf-hscroll lf) 0) (set-leaf-hscroll! lf 0))]
+        [(> pt last-buf-pos)
+         (define target-lines (max 1 (quotient (* rows 2) 3)))
+         (text-set-marker-pos! tx (leaf-start lf) (beginning-of-nth-prev-line gb pt target-lines))
+         (when (> (leaf-hscroll lf) 0) (set-leaf-hscroll! lf 0))]
+        [else (void)])
+  (when (and selected? (truncate-lines? buf))
     (define pt-col
       (let ([bol (gap-scan-byte gb pt 'backward (λ (b) (= b #x0A)))])
         (gap-display-width gb (if (>= bol 0) (add1 bol) 0) pt)))
-    (define hs (window-hscroll w))
-    ;; Horizontal auto-scroll.
-    ;; Threshold: scroll right when pt-col reaches or exceeds hs+cols.
-    ;; target = pt-col - cols - 1  keeps 1 column of breathing room
-    ;; on the right edge.  Using 1 (not 0) ensures CJK wide characters
-    ;; (display-width 2) are not clipped mid-glyph at the boundary.
-    (cond
-      [(< pt-col hs)        (set-window-hscroll! w pt-col)]
-      [(>= pt-col (+ hs cols)) (set-window-hscroll! w (max 0 (- pt-col cols -1)))]
-      [else (void)])))
+    (define hs (leaf-hscroll lf))
+    (cond [(< pt-col hs)        (set-leaf-hscroll! lf pt-col)]
+          [(>= pt-col (+ hs cols)) (set-leaf-hscroll! lf (max 0 (- pt-col cols -1)))]
+          [else (void)])))
 
 ;; ============================================================
-;; update-frame-size!
+;; update-frame-size! / cache
 ;; ============================================================
 
 (define (update-frame-size! frm)
   (detect-terminal-size!)
-  (define w (terminal-width))
-  (define h (terminal-height))
+  (define w (terminal-width)) (define h (terminal-height))
   (when (or (not (= w (frame-width frm))) (not (= h (frame-height frm))))
-    (set-frame-width! frm w)
-    (set-frame-height! frm h)
+    (set-frame-width! frm w) (set-frame-height! frm h)
     (layout-frame! frm)
     (check-min-size! render-slot frm)))
-
-;; ============================================================
-;; Frame cache
-;; ============================================================
 
 (define frame-cache-table (make-hasheq))
 
@@ -259,12 +221,13 @@
   (detect-terminal-size!)
   (update-frame-size! frm)
   (init-face-cache!)
-  ;; Full redraw if frame was resized (dirty flag)
   (when (hash-ref frame-dirty? frm #f)
     (display format-clear-screen)
     (hash-remove! frame-dirty? frm))
-  (define leaves (filter window-leaf? (frame-window-list frm)))
-  (for ([w (in-list leaves)]) (recenter-point! w))
+  ;; Recenter each leaf
+  (define sel (frame-selected frm))
+  (for ([(lf rect) (in-hash (frame-geometry frm))])
+    (recenter-point! lf rect (eq? lf sel)))
   (define-values (new-vb cr cc) (compose-frame! frm))
   (define cache (hash-ref frame-cache-table frm #f))
   (display format-cursor-hide)
@@ -276,17 +239,4 @@
   (hash-set! frame-cache-table frm new-vb)
   (flush-output))
 
-;; set initial render-slot after display-frame is defined
 (set-box! render-slot display-frame)
-
-;; ============================================================
-;; display-buffer — convenience entry
-;; ============================================================
-
-(define (display-buffer buf)
-  (define frm (current-frame))
-  (if frm
-      (display-frame frm)
-      (let ([frm* (init-root-frame buf (terminal-width) (terminal-height))])
-        (invalidate-frame-cache! frm*)
-        (display-frame frm*))))

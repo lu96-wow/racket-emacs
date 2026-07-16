@@ -21,7 +21,7 @@
 
 (struct command
   (name       ; string
-   fn         ; (window frame key-event) -> void
+   fn         ; (leaf frame key-event) -> void
    modifies?) ; boolean — does this change buffer content?
   #:transparent)
 
