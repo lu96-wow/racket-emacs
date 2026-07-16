@@ -291,6 +291,9 @@
     (detect-color-depth!)
     (format-alt-screen-enable)
     (display format-clear-screen)
+    ;; Explicitly disable mouse & paste in case a crash left them on.
+    (display format-mouse-disable)
+    (display format-bracketed-paste-disable)
     (flush-output)
 
     (define buf (make-buffer "*scratch*" welcome-text))

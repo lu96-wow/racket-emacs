@@ -77,7 +77,7 @@
 
     ;; Backspace (DEL=127 or BS=8)
     [(or (= b 127) (= b 8))
-     (key-event #\backspace #f #f #f 'backspace)]
+     (key-event #f #f #f #f 'backspace)]
 
     ;; Escape
     [(= b ESC)
@@ -166,9 +166,13 @@
          ;; SS3 lookup
          [ss3?
           (hash-ref ss3-symbol b (λ () #f))]
-         ;; CSI simple final byte lookup
+         ;; Final byte (0x40-0x7F) — simple CSI lookup
+         [(<= #x40 b #x7E)
+          (hash-ref csi-symbol b (λ () #f))]
+         ;; Unrecognized CSI (mouse report, etc.) → drain the rest
          [else
-          (hash-ref csi-symbol b (λ () #f))])))
+          (drain-csi-sequence read-timeout b)
+          #f])))
 
 (define (parse-csi-numbered read-timeout b1)
   ;; Read digits until a tilde (~) or another final byte
@@ -186,7 +190,25 @@
                [_ #f])]
             [(<= 48 b 57)
              (loop (+ (* n 10) (- b 48)) (add1 count))]
-            [else #f])))))
+            ;; Not a digit, not '~' — drain rest of CSI
+            [else
+             (drain-csi-sequence read-timeout b)
+             #f])))))
+
+;; ============================================================
+;; CSI drain — consume bytes until a final byte (0x40-0x7E)
+;; ============================================================
+;; Called when we encounter an unrecognized CSI sequence
+;; (mouse reports, unsupported escape codes, etc.).
+;; Reads and discards bytes until the sequence terminates.
+
+(define (drain-csi-sequence read-timeout first-unexpected)
+  ;; If the first unexpected byte is already a final byte, we are done.
+  (when (and first-unexpected (< first-unexpected #x40))
+    (let drain ()
+      (define b (read-timeout 0.05))
+      (when (and b (< b #x40))
+        (drain)))))
 
 ;; ============================================================
 ;; UTF-8 rest

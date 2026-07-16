@@ -58,10 +58,13 @@
 ;; ============================================================
 
 (define (self-insert-key? ke)
-  ;; Has a displayable character, no modifying flags.
-  (and (key-event-char ke)
+  ;; Has a printable character (≥32, excluding DEL), no modifying flags.
+  (define ch (key-event-char ke))
+  (and ch
        (not (key-event-ctrl? ke))
-       (not (key-event-meta? ke))))
+       (not (key-event-meta? ke))
+       (>= (char->integer ch) 32)
+       (not (char=? ch #\rubout))))
 
 (define (backspace-key? ke)
   (eq? (key-event-symbol ke) 'backspace))
