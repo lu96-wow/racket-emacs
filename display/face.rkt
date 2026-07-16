@@ -1,24 +1,30 @@
 #lang racket
 
-;; display/face.rkt — Minimal face system
+;; display/face.rkt — Face/color system
 ;;
-;; face-attrs (logical properties) → realized-face (ANSI bytes).
-;; Simple cache keyed by props hash.
-;; Depends only on platform/ansi.rkt for color constants.
+;; face-attrs (logical) → realized-face (ANSI bytes) → face-cache.
+;; Used by display/render.rkt for per-character face rendering.
 
 (require "../platform/ansi.rkt")
 
 (provide
- ;; face-attrs
- make-face-attrs face-attrs? face-attrs-props
+ ;; attribute keys
  attr-foreground attr-background attr-weight attr-slant
  attr-underline attr-inverse-video
 
- ;; realize
- realize-face
+ ;; face-attrs
+ make-face-attrs face-attrs? face-attrs-props
 
- ;; cache
- make-face-cache face-cache-lookup!)
+ ;; realized-face
+ realized-face? realized-face-id realized-face-attrs
+ realized-face-ansi-bytes
+
+ ;; face cache
+ make-face-cache face-cache? face-cache-by-id face-cache-next-id
+ face-cache-lookup-or-realize!
+
+ ;; global cache
+ current-face-cache init-face-cache!)
 
 ;; ============================================================
 ;; Attribute keys
@@ -32,7 +38,7 @@
 (define attr-inverse-video 'inverse-video)
 
 ;; ============================================================
-;; face-attrs — logical face description
+;; face-attrs
 ;; ============================================================
 
 (struct face-attrs (props) #:transparent)
@@ -43,10 +49,12 @@
      (values (list-ref kvs i) (list-ref kvs (add1 i))))))
 
 ;; ============================================================
-;; realize-face — face-attrs + depth → ANSI bytes string
+;; Realized face
 ;; ============================================================
 
-(define (realize-face attrs depth)
+(struct realized-face (id attrs ansi-bytes) #:transparent)
+
+(define (realize-face id attrs depth)
   (define out (open-output-bytes))
   (define fg (hash-ref (face-attrs-props attrs) attr-foreground #f))
   (when fg (display (color->ansi-fg fg depth) out))
@@ -60,10 +68,10 @@
     (display format-underline out))
   (when (hash-ref (face-attrs-props attrs) attr-inverse-video #f)
     (display format-reverse out))
-  (get-output-bytes out))
+  (realized-face id attrs (get-output-bytes out)))
 
 ;; ============================================================
-;; Color → ANSI helpers
+;; Color helpers
 ;; ============================================================
 
 (define (color->ansi-fg c depth)
@@ -96,20 +104,33 @@
   (+ (if bright? 8 0) (if (> r 128) 1 0) (if (> g 128) 2 0) (if (> b 128) 4 0)))
 
 ;; ============================================================
-;; Face cache — props hash → ansi-bytes
+;; Face cache
 ;; ============================================================
 
 (struct face-cache
-  ([table #:mutable])  ; (hash/c hash? bytes?)
+  ([table #:mutable] [by-id #:mutable] [next-id #:mutable])
   #:transparent)
 
 (define (make-face-cache)
-  (define default-bs (realize-face (make-face-attrs) (color-depth)))
-  (define tbl (make-hash))
-  (hash-set! tbl (hasheq) default-bs)
-  (face-cache tbl))
+  (define default-rf (realize-face 0 (make-face-attrs) (color-depth)))
+  (face-cache (make-hash) (vector default-rf) 1))
 
-(define (face-cache-lookup! fc attrs)
+(define (face-cache-lookup-or-realize! fc attrs depth)
   (define key (face-attrs-props attrs))
   (hash-ref! (face-cache-table fc) key
-    (λ () (realize-face attrs (color-depth)))))
+    (λ ()
+      (define id (face-cache-next-id fc))
+      (define rf (realize-face id attrs depth))
+      (set-face-cache-next-id! fc (add1 id))
+      (set-face-cache-by-id! fc (vector-append (face-cache-by-id fc) (vector rf)))
+      rf)))
+
+;; ============================================================
+;; Global face cache
+;; ============================================================
+
+(define global-face-cache (box #f))
+(define (current-face-cache) (unbox global-face-cache))
+(define (init-face-cache!)
+  (unless (unbox global-face-cache)
+    (set-box! global-face-cache (make-face-cache))))

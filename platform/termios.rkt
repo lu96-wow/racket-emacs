@@ -9,6 +9,7 @@
 (provide
  screen-init! screen-cleanup!
  terminal-width terminal-height get-window-size
+ detect-terminal-size!
  terminal? STDIN_FILENO)
 
 (define libc (ffi-lib #f))

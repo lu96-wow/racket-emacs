@@ -2,8 +2,8 @@
 
 ;; main.rkt — Editor entry point
 ;;
-;; Composes: platform → kernel → display into a runnable editor.
-;; Single buffer, single view, basic editing keys.
+;; Composes platform → kernel → display into a runnable editor.
+;; Uses window/frame system from display/window.rkt.
 
 (require "kernel/buffer.rkt"
          "kernel/text.rkt"
@@ -14,7 +14,10 @@
          "platform/ansi.rkt"
          "platform/termios.rkt"
          "platform/event.rkt"
-         "display/render.rkt")
+         "display/render.rkt"
+         "display/window.rkt"
+         "display/registry.rkt"
+         "display/face.rkt")
 
 ;; ============================================================
 ;; Welcome text
@@ -81,7 +84,6 @@
 (define (prev-line buf)
   (define gb (text-gap (buffer-text buf)))
   (define pt (buffer-point buf))
-  ;; Find bol of current line
   (define bol
     (let loop ([p pt])
       (if (<= p 0) 0
@@ -271,8 +273,8 @@
   ;; Commit undo group
   (recorder-commit! rec)
 
-  ;; Redraw
-  (display-buffer buf)
+  ;; Redraw via frame
+  (display-frame (current-frame))
 
   ;; Continue unless quit
   (unless (and (key-event-ctrl? ke) (key-event-char ke)
@@ -291,17 +293,25 @@
     (detect-color-depth!)
     (format-alt-screen-enable)
     (display format-clear-screen)
-    ;; Explicitly disable mouse & paste in case a crash left them on.
     (display format-mouse-disable)
     (display format-bracketed-paste-disable)
     (flush-output)
 
-    (define buf (make-buffer "*scratch*" welcome-text))
-    (set-buffer-point! buf 0)
-    (display-buffer buf)
+    ;; Create buffers
+    (define main-buf (get-buffer-create "*scratch*"))
+    (buffer-insert! main-buf welcome-text 0)
+    (set-buffer-point! main-buf 0)
+    (set-buffer main-buf)
+    (register-buffer! main-buf)
+
+    (define mini-buf (get-buffer-create " *minibuf*"))
+    (register-buffer! mini-buf)
+
+    ;; Create frame
+    (void (init-root-frame main-buf mini-buf (terminal-width) (terminal-height)))
 
     (with-handlers ([exn:break? (λ (e) (void))])
-      (event-loop buf))
+      (event-loop main-buf))
 
     (format-alt-screen-disable)
     (screen-cleanup!)
