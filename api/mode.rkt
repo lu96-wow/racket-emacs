@@ -11,6 +11,7 @@
 
 (require "keymap.rkt"
          "command.rkt"
+         "lang.rkt"
          "../kernel/buffer.rkt")
 
 (provide
@@ -81,4 +82,5 @@
 
 (define (init-buffer-with-filename! buf fname)
   (set-buffer-filename! buf fname)
-  (update-buffer-keymap! buf))
+  (update-buffer-keymap! buf)
+  (update-buffer-font-lock! buf))

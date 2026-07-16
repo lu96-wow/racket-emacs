@@ -23,8 +23,9 @@
          "api/keymap.rkt"
          "api/mode.rkt"
          "api/bindings.rkt"
-         "base/font-lock.rkt"
-         "api/lang/racket-lang.rkt")
+         "api/lang.rkt"
+         "api/lang/racket-lang.rkt"
+         "base/font-lock.rkt")
 
 (define welcome-text
   (string-append
@@ -104,6 +105,7 @@
   (with-handlers ([exn:fail? (λ (e) (screen-cleanup!) (raise e))])
     (screen-init!)
     (detect-color-depth!)
+    (init-face-cache!)
     (format-alt-screen-enable)
     (display format-clear-screen)
     (display format-mouse-enable)
@@ -115,13 +117,12 @@
     (define racket-km (make-keymap))
     (register-mode! (editor-mode 'racket racket-km ".rkt"))
 
-    (define-racket-font-lock-faces!)
+    (register-lang! racket-lang-config)
 
     (define main-buf (get-buffer-create "*scratch*"))
     (buffer-insert! main-buf welcome-text 0)
     (set-buffer-point! main-buf 0)
     (init-buffer-with-filename! main-buf "*scratch*.rkt")
-    (setup-racket-lang! main-buf)
 
     (init-frame main-buf (terminal-width) (terminal-height))
     ((unbox render-slot) (current-frame))

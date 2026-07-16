@@ -1,53 +1,44 @@
 #lang racket
 
-;; api/lang/racket-lang.rkt — Racket language font-lock configuration
+;; api/lang/racket-lang.rkt — Racket language config (pure data)
 ;;
-;; Provides Racket-specific syntax table, keyword patterns, and
-;; face definitions.  Called by main.rkt to set up Racket buffers.
+;; Exports a lang-config struct and a separate face-definition list.
+;; No imperative setup functions — composition is handled by api/lang.rkt.
 
 (require "../../kernel/syntax.rkt"
-         "../../kernel/buffer.rkt"
-         "../../base/font-lock.rkt"
-         "../../display/face.rkt")
+         "../../display/face.rkt"
+         "../lang.rkt")
 
 (provide
- racket-syntax-table
- racket-font-lock-keywords
- setup-racket-lang!
- define-racket-font-lock-faces!)
+ racket-lang-config        ; lang-config?
+ racket-font-lock-faces)   ; (listof (list symbol? face-attrs?))
 
 ;; ============================================================
-;; Face definitions
+;; Face definitions — data, applied by compose-lang-configs
 ;; ============================================================
 
-(define (define-racket-font-lock-faces!)
-  ;; Only define if not already registered
-  (define-face! 'font-lock-comment-face
-    (make-face-attrs 'foreground (list 100 160 100) 'slant 'italic))
-  (define-face! 'font-lock-string-face
-    (make-face-attrs 'foreground (list 80 180 80)))
-  (define-face! 'font-lock-keyword-face
-    (make-face-attrs 'foreground (list 50 150 255) 'weight 'bold))
-  (define-face! 'font-lock-builtin-face
-    (make-face-attrs 'foreground (list 50 150 255)))
-  (define-face! 'font-lock-constant-face
-    (make-face-attrs 'foreground (list 220 80 80)))
-  (define-face! 'font-lock-type-face
-    (make-face-attrs 'foreground (list 200 180 60) 'weight 'bold))
-  (define-face! 'font-lock-function-name-face
-    (make-face-attrs 'weight 'bold)))
+(define racket-font-lock-faces
+  (list
+   (list 'font-lock-comment-face
+         (make-face-attrs 'foreground (list 100 160 100) 'slant 'italic))
+   (list 'font-lock-string-face
+         (make-face-attrs 'foreground (list 80 180 80)))
+   (list 'font-lock-keyword-face
+         (make-face-attrs 'foreground (list 50 150 255) 'weight 'bold))
+   (list 'font-lock-builtin-face
+         (make-face-attrs 'foreground (list 50 150 255)))
+   (list 'font-lock-constant-face
+         (make-face-attrs 'foreground (list 220 80 80)))
+   (list 'font-lock-type-face
+         (make-face-attrs 'foreground (list 200 180 60) 'weight 'bold))
+   (list 'font-lock-function-name-face
+         (make-face-attrs 'weight 'bold))))
 
 ;; ============================================================
-;; Syntax table
+;; Keyword patterns — data
 ;; ============================================================
 
-(define racket-syntax-table (make-racket-syntax-table))
-
-;; ============================================================
-;; Keyword patterns — order = priority (first match wins)
-;; ============================================================
-
-(define racket-font-lock-keywords
+(define racket-keywords
   (list
    ;; Special forms
    (cons (pregexp "\\b(define|lambda|λ|let|let\\*|letrec|let-values|let\\*-values|if|cond|case|and|or|when|unless|begin|set!|quote|quasiquote|unquote|unquote-splicing|syntax|quasisyntax|unsyntax|unsyntax-splicing|syntax-rules|syntax-case|with-syntax|parameterize|dynamic-wind|call/cc|call-with-current-continuation|call-with-values|let/cc|let/ec)\\b")
@@ -102,15 +93,13 @@
          'font-lock-builtin-face)))
 
 ;; ============================================================
-;; Setup function
+;; lang-config — pure data, no behaviour
 ;; ============================================================
 
-(define (setup-racket-lang! buf)
-  (set-buffer-syntax-table! buf racket-syntax-table)
-  (set-buffer-font-lock-config! buf
-    (make-font-lock-config
-     #:keywords racket-font-lock-keywords
-     #:syntax? #t
-     #:case-fold? #f))
-  ;; Full initial fontification
-  (fontify-region! buf 0 (buffer-length buf)))
+(define racket-lang-config
+  (lang-config 'racket
+               '(".rkt" ".scrbl")
+               (make-racket-syntax-table)
+               racket-keywords
+               racket-font-lock-faces
+               #f))  ; case-fold? = #f

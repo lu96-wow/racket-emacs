@@ -23,8 +23,8 @@
 (provide
  ;; config
  font-lock-config? make-font-lock-config
+ font-lock-config-syntax-table
  font-lock-config-keywords
- font-lock-config-syntax?
  font-lock-config-case-fold?
  set-buffer-font-lock-config!
  buffer-font-lock-config
@@ -36,23 +36,24 @@
 
  ;; orchestration
  fontify-region!
- fontify-after-change!)
+ fontify-after-change!
+ fontify-buffer!)
 
 ;; ============================================================
 ;; Config
 ;; ============================================================
 
 (struct font-lock-config
-  (keywords      ; (listof (cons pregexp? symbol?)) — match order = priority
-   syntax?       ; boolean? — enable syntax pass?
+  (syntax-table  ; syntax-table? | #f — for syntax-driven pass
+   keywords      ; (listof (cons pregexp? symbol?)) — match order = priority
    case-fold?)   ; boolean? — case-insensitive keyword match?
   #:transparent)
 
 (define (make-font-lock-config
-         #:keywords [keywords '()]
-         #:syntax?  [syntax? #t]
-         #:case-fold? [case-fold? #f])
-  (font-lock-config keywords syntax? case-fold?))
+         #:syntax-table [st #f]
+         #:keywords    [keywords '()]
+         #:case-fold?  [case-fold? #f])
+  (font-lock-config st keywords case-fold?))
 
 ;; Per-buffer storage
 (define font-lock-config-table (make-hasheq))
@@ -64,19 +65,10 @@
 (define (buffer-font-lock-config buf)
   (hash-ref font-lock-config-table buf (λ () #f)))
 
-;; ============================================================
-;; Buffer-side syntax table storage
-;; ============================================================
-
-(define syntax-table-storage (make-hasheq))
-
+;; ── convenience aliases ──
 (define (buffer-syntax-table buf)
-  (hash-ref syntax-table-storage buf (λ () #f)))
-
-(define (set-buffer-syntax-table! buf st)
-  (hash-set! syntax-table-storage buf st))
-
-(provide buffer-syntax-table set-buffer-syntax-table!)
+  (define cfg (buffer-font-lock-config buf))
+  (and cfg (font-lock-config-syntax-table cfg)))
 
 ;; ============================================================
 ;; Syntax pass — data-driven: reads syntax-table rules
@@ -242,9 +234,8 @@
       ;; Default passes — each checks its own activation
       (list
        (λ (b beg end)
-         (when (and (buffer-syntax-table b)
-                    (let ([cfg (buffer-font-lock-config b)])
-                      (or (not cfg) (font-lock-config-syntax? cfg))))
+         (when (and (buffer-font-lock-config b)
+                    (font-lock-config-syntax-table (buffer-font-lock-config b)))
            (fontify-syntax! b beg end)))
        (λ (b beg end)
          (when (and (buffer-font-lock-config b)
@@ -292,6 +283,9 @@
 
   (fontify-region! buf sol eol))
 
+(define (fontify-buffer! buf)
+  (fontify-region! buf 0 (buffer-length buf)))
+
 ;; ============================================================
 ;; Tests
 ;; ============================================================
@@ -311,7 +305,8 @@
   ;; Test: line comment
   (let ([buf (make-buffer "test" ";; comment\n(define x 42)")])
     (define st (make-racket-syntax-table))
-    (set-buffer-syntax-table! buf st)
+    (define cfg (make-font-lock-config #:syntax-table st))
+    (set-buffer-font-lock-config! buf cfg)
     (fontify-syntax! buf 0 (buffer-length buf))
     (check-equal? (buffer-face-at buf 2) 'font-lock-comment-face)
     (check-equal? (buffer-face-at buf 13) #f))
@@ -319,7 +314,8 @@
   ;; Test: string
   (let ([buf (make-buffer "test" "\"hello world\"")])
     (define st (make-racket-syntax-table))
-    (set-buffer-syntax-table! buf st)
+    (define cfg (make-font-lock-config #:syntax-table st))
+    (set-buffer-font-lock-config! buf cfg)
     (fontify-syntax! buf 0 (buffer-length buf))
     (check-equal? (buffer-face-at buf 2) 'font-lock-string-face)
     (check-equal? (buffer-face-at buf 0) 'font-lock-string-face))
@@ -327,16 +323,17 @@
   ;; Test: block comment
   (let ([buf (make-buffer "test" "#| block |# after")])
     (define st (make-racket-syntax-table))
-    (set-buffer-syntax-table! buf st)
+    (define cfg (make-font-lock-config #:syntax-table st))
+    (set-buffer-font-lock-config! buf cfg)
     (fontify-syntax! buf 0 (buffer-length buf))
     (check-equal? (buffer-face-at buf 3) 'font-lock-comment-face))
 
   ;; Test: keyword
   (let ([buf (make-buffer "test" "(define foo 42)")])
-    (define config
+    (define cfg
       (make-font-lock-config
        #:keywords (list (cons (pregexp "\\bdefine\\b") 'font-lock-keyword-face))))
-    (set-buffer-font-lock-config! buf config)
+    (set-buffer-font-lock-config! buf cfg)
     (fontify-keywords! buf 0 (buffer-length buf))
     (check-equal? (buffer-face-at buf 2) 'font-lock-keyword-face))
 )
