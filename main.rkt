@@ -1,36 +1,42 @@
 #lang racket
 
-;; main.rkt — Editor entry point
+;; main.rkt — Editor entry point with lazy redisplay
 ;;
-;; Thin composition: platform → api → kernel → display.
-;; Event loop: read → dispatch → execute → commit-undo → redraw
+;; Architecture:
+;;   read event → dispatch to command (buf evt) → mark dirty
+;;   → at safe point: check dirty flag → render
+;;
+;; Separation of concerns:
+;;   - Commands modify buffer, set dirty flag
+;;   - Event loop owns window selection, undo, fontify
+;;   - Render pipeline is called lazily, not after every event
 
 (require "kernel/buffer.rkt"
          "kernel/text.rkt"
          "kernel/gap/gap.rkt"
          "kernel/gap/query.rkt"
-         "kernel/key-event/key-event.rkt"
          "kernel/undo/recorder.rkt"
          "platform/ansi.rkt"
          "platform/termios.rkt"
          "platform/event.rkt"
          "display/render.rkt"
          "display/window.rkt"
-         "display/registry.rkt"
          "display/face.rkt"
+         "display/registry.rkt"
+         "display/mouse.rkt"
          "api/command.rkt"
          "api/editing.rkt"
          "api/keymap.rkt"
          "api/mode.rkt"
          "api/bindings.rkt"
+         "base/font-lock.rkt"
          "api/lang.rkt"
-         "api/lang/racket-lang.rkt"
-         "base/font-lock.rkt")
+         "api/lang/racket-lang.rkt")
 
 (define welcome-text
   (string-append
-   ";; Welcome to racket-emacs-rebuild\n"
-   ";; Clean functional window layer: calc → apply pipeline\n"
+   ";; Welcome to racket-emacs-rebuild-display\n"
+   ";; Lazy redisplay + separated concerns\n"
    ";;\n"
    ";; Keys:\n"
    ";;   C-f C-b C-n C-p    movement\n"
@@ -51,33 +57,43 @@
 ;; ============================================================
 
 (define (event-loop)
+  ;; ---- Safe point: render if needed ----
+  (when (redisplay-needed?)
+    ((unbox render-slot) (current-frame))
+    (clear-redisplay-needed!))
+
+  ;; ---- Read next event ----
   (define evt (read-key-event!))
   (define frm (current-frame))
 
   (cond
+    ;; Mouse
     [(mouse-event? evt)
      (handle-mouse evt)
-     ((unbox render-slot) frm)
      (event-loop)]
 
+    ;; Quit
     [(and (key-event? evt)
           (key-event-ctrl? evt) (key-event-char evt)
           (char=? (char-downcase (key-event-char evt)) #\q))
      (void)]
 
+    ;; Keyboard → command dispatch
     [else
-     (define lf (selected-leaf))
-     (define buf (and lf (leaf-buffer lf)))
+     (define buf (current-buffer))
      (define cmd (or (and buf (lookup-key buf evt))
                      (and (self-insert-key? evt) cmd-self-insert)))
      (when (command? cmd)
-       ((command-fn cmd) lf frm evt)
-       (define buf* (and lf (leaf-buffer lf)))
-       (when (and buf* (command-modifies? cmd))
-         (recorder-commit! (buffer-undo-recorder buf*))
-         (fontify-after-change! buf*)
-         (clear-buffer-change-region! buf*)))
-     ((unbox render-slot) frm)
+       ;; Execute command
+       ((command-fn cmd) buf evt)
+
+       ;; Post-command hooks (explicit, no implicit hook system)
+       (when (command-modifies? cmd)
+         ;; All commands get their buffer from global state, so buf is current
+         (define actual-buf (current-buffer))
+         (recorder-commit! (buffer-undo-recorder actual-buf))
+         (fontify-after-change! actual-buf)
+         (clear-buffer-change-region! actual-buf)))
      (event-loop)]))
 
 ;; ============================================================
@@ -95,7 +111,8 @@
         (set-frame-selected! frm hit-lf))
       (define hit-buf (leaf-buffer hit-lf))
       (set-buffer hit-buf)
-      (set-buffer-point! hit-buf pos))))
+      (set-buffer-point! hit-buf pos))
+    (mark-redisplay-needed!)))
 
 ;; ============================================================
 ;; Main
@@ -115,8 +132,6 @@
     (init-global-keymap!)
 
     (define racket-km (make-keymap))
-    (register-mode! (editor-mode 'racket racket-km ".rkt"))
-
     (register-lang! racket-lang-config)
 
     (define main-buf (get-buffer-create "*scratch*"))
@@ -125,6 +140,10 @@
     (init-buffer-with-filename! main-buf "*scratch*.rkt")
 
     (init-frame main-buf (terminal-width) (terminal-height))
+    (check-min-size!)
+
+    ;; Initial render
+    (mark-redisplay-needed!)
     ((unbox render-slot) (current-frame))
 
     (with-handlers ([exn:break? (λ (e) (void))])

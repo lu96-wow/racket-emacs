@@ -1,9 +1,15 @@
 #lang racket
 
-;; display/render.rkt — Window rendering pipeline
+;; display/render.rkt — Display pipeline with dirty-flag-driven lazy redisplay
 ;;
-;; For each leaf: layout (already computed) → fill vbuffer → compose.
-;; Incremental diff against cache, flush only changed rows.
+;; Three clearly separated phases:
+;;   prepare  — decide which leaves need update (dirty-flag + row-cache match)
+;;   generate — build vbuffer for each dirty leaf
+;;   flush    — delta diff + terminal output
+;;
+;; Pure calc functions produce data; apply functions mutate state.
+;; The render function itself is called by the event loop at safe points,
+;; not after every event.
 
 (require "../kernel/buffer.rkt"
          "../kernel/text.rkt"
@@ -17,15 +23,29 @@
          "layout.rkt"
          "flush.rkt"
          "window.rkt"
-         "registry.rkt"
+         "scratch.rkt"
+         "dirty.rkt"
          "mouse.rkt")
 
 (provide
+ ;; main entry
  display-frame
- check-min-size! render-slot
+ render-slot
+
+ ;; dirty flags (re-export)
+ (all-from-out "dirty.rkt")
+
+ ;; size
  update-frame-size!
+ check-min-size!
+
+ ;; cache
  invalidate-frame-cache!
+ invalidate-leaf-cache!
+
+ ;; recenter
  recenter-point!
+
  ;; re-export
  (all-from-out "layout.rkt")
  (all-from-out "mouse.rkt"))
@@ -36,36 +56,105 @@
 
 (define MIN-ROWS 4)
 (define MIN-COLS 15)
-(define frame-dirty? (make-hasheq))
 (define render-slot (box #f))
 
 (define (render-too-small frm)
   (detect-terminal-size!)
-  (define w (frame-width frm)) (define h (frame-height frm))
   (display format-cursor-hide)
-  (define msg "window too small")
-  (hash-remove! frame-dirty? frm)
   (display format-clear-screen)
-  (when (and (>= h 1) (>= w (string-length msg)))
-    (display (format-cursor-move (quotient h 2) 0))
-    (display (make-string (max 0 (quotient (- w (string-length msg)) 2)) #\space))
+  (define msg "window too small")
+  (when (and (>= (frame-height frm) 1)
+             (>= (frame-width frm) (string-length msg)))
+    (display (format-cursor-move (quotient (frame-height frm) 2) 0))
+    (display (make-string (max 0 (quotient (- (frame-width frm) (string-length msg)) 2)) #\space))
     (display format-reverse) (display msg) (display format-reset))
   (display format-cursor-show) (flush-output))
 
-(define (check-min-size! box frm)
-  (set-box! box (if (and (>= (frame-width frm) MIN-COLS) (>= (frame-height frm) MIN-ROWS))
-                    display-frame render-too-small)))
+(define (check-min-size!)
+  (define frm (current-frame))
+  (when frm
+    (set-box! render-slot
+      (if (and (>= (frame-width frm) MIN-COLS) (>= (frame-height frm) MIN-ROWS))
+          display-frame
+          render-too-small))))
 
 ;; ============================================================
-;; render-visual-lines!
+;; Per-leaf row caches
 ;; ============================================================
 
-(define (render-visual-lines! vb buf gb vlines pt-pos cols)
+(define leaf-cache-table (make-hasheq))
+
+(define (leaf-row-cache lf)
+  (hash-ref leaf-cache-table lf (λ ()
+    (define c (make-row-cache 200))  ; generous max rows
+    (hash-set! leaf-cache-table lf c)
+    c)))
+
+(define (invalidate-leaf-cache! lf)
+  (define cache (hash-ref leaf-cache-table lf #f))
+  (when cache (row-cache-invalidate! cache)))
+
+(define (invalidate-frame-cache! [frm #f])
+  (define f (or frm (current-frame)))
+  (when f
+    (for ([lf (in-list (frame-leaf-list f))])
+      (invalidate-leaf-cache! lf))
+    (frame-cache-invalidate! f)))
+
+;; ============================================================
+;; Frame-level vbuffer cache (for delta flush)
+;; ============================================================
+
+(define frame-cache-table (make-hasheq))
+
+(define (frame-cache-invalidate! frm)
+  (hash-remove! frame-cache-table frm))
+
+;; ============================================================
+;; render-leaf! — fill vbuffer for one leaf, using row cache
+;; ============================================================
+
+(define (render-leaf! lf rows cols selected?)
+  (define buf (leaf-buffer lf))
+  (unless buf (error 'render-leaf! "leaf has no buffer"))
+  (when (or (zero? rows) (zero? cols))
+    (values (make-vbuffer 1 1) #f #f))
+
+  (define tx (buffer-text buf))
+  (define gb (text-gap tx))
+  (define start-pos (if (leaf-start lf) (text-marker-pos tx (leaf-start lf)) 0))
+  (define pt-pos (if selected? (buffer-point buf) (leaf-point lf)))
+  (define left-col (leaf-hscroll lf))
+  (define wrap-mode (if (truncate-lines? buf) 'none 'char))
+
+  (define vb (make-vbuffer rows cols))
+  (define content-rows (max 1 rows))  ; todo: mode-line would use rows-1
+
+  ;; ---- Generate visual lines ----
+  (define vlines (visual-line-lines gb start-pos content-rows cols
+                                    #:wrap-mode wrap-mode #:left-col left-col))
+
+  ;; ---- Update row cache ----
+  (define cache (leaf-row-cache lf))
+  (for ([vl (in-list vlines)] [r (in-naturals)])
+    (define line-pos  (visual-line-buf-pos vl))
+    (define line-end  (+ line-pos (string-length (visual-line-content vl))))
+    (define glyphs
+      (for/vector ([ch (in-string (visual-line-content vl))])
+        (define cw (max 1 (char-display-width ch)))
+        (glyph ch cw 0)))  ; face-id=0 for now
+    (row-cache-update! cache r line-pos line-end glyphs
+                       (visual-line-continued? vl)
+                       (visual-line-truncated? vl)))
+  ;; Clear remaining cache rows
+  (row-cache-clear-from! cache (length vlines))
+
+  ;; ---- Fill vbuffer from visual lines ----
+  (define face-id-cache (make-hash))
   (define reg-active? (region-active? buf))
   (define reg-beg (and reg-active? (region-beginning buf)))
   (define reg-end (and reg-active? (region-end buf)))
-  ;; Face-id cache: (base-face . overlay) → id, avoids repeated merges
-  (define face-id-cache (make-hash))
+
   (define-values (c-row c-col)
     (for/fold ([cr #f] [cc #f]) ([vl (in-list vlines)] [r (in-naturals)])
       (define line-pos  (visual-line-buf-pos vl))
@@ -95,41 +184,16 @@
                 0)))
         (vbuffer-put-char! vb r col ch #:face-id fid)
         (+ col cw))
-      (when (visual-line-truncated? vl) (vbuffer-put-char! vb r (sub1 cols) #\$))
+      (when (visual-line-truncated? vl)
+        (vbuffer-put-char! vb r (sub1 cols) #\$))
       (if (and (>= pt-pos line-pos) (<= pt-pos (+ line-pos char-len)))
           (values r (gap-display-width gb line-pos pt-pos))
           (values cr cc))))
-  (if c-row (values c-row c-col)
+  (if c-row (values vb c-row c-col)
       (let ([rev (reverse vlines)])
-        (if (null? rev) (values 0 0)
+        (if (null? rev) (values vb 0 0)
             (let ([lv (car rev)])
-              (values (sub1 (length vlines)) (visual-line-display-len lv)))))))
-
-;; ============================================================
-;; render-leaf! — fill vbuffer for one leaf
-;; ============================================================
-
-(define (render-leaf! lf rows cols selected?)
-  (define buf (leaf-buffer lf))
-  (unless buf (error 'render-leaf! "leaf has no buffer"))
-  (when (or (zero? rows) (zero? cols))
-    (values (make-vbuffer 1 1) #f #f))
-  (define tx (buffer-text buf))
-  (define gb (text-gap tx))
-  (define start-pos (if (leaf-start lf) (text-marker-pos tx (leaf-start lf)) 0))
-  (define pt-pos (if selected? (buffer-point buf) (leaf-point lf)))
-  (define left-col (leaf-hscroll lf))
-  (define wrap-mode (if (truncate-lines? buf) 'none 'char))
-  (define vb (make-vbuffer rows cols))
-  (define-values (c-row c-col)
-    (if (> rows 0)
-        (let* ([vlines (visual-line-lines gb start-pos rows cols
-                                          #:wrap-mode wrap-mode #:left-col left-col)])
-          (render-visual-lines! vb buf gb vlines pt-pos cols))
-        (values #f #f)))
-  (values vb
-          (and selected? c-row)
-          (and selected? c-col)))
+              (values vb (sub1 (length vlines)) (visual-line-display-len lv)))))))
 
 ;; ============================================================
 ;; compose-frame!
@@ -153,7 +217,7 @@
   (values final-vb cur-row cur-col))
 
 ;; ============================================================
-;; recenter-point!
+;; Scroll helpers (from rebuild)
 ;; ============================================================
 
 (define (end-of-physical-lines gb start n)
@@ -172,15 +236,8 @@
           (if (< nl 0) 0
               (if (zero? remaining) (add1 nl) (loop nl (sub1 remaining))))))))
 
-;; ============================================================
-;; Scroll: pure calc + separate apply
-;; ============================================================
-
-;; calc-scroll — pure: compute new start-pos and hscroll
-;; Returns (values start-pos hscroll) where #f means "no change"
 (define (calc-scroll gb pt-pos start-pos rows cols hscroll selected? trunc?)
   (define len (gap-length gb))
-  ;; Vertical: last visible buffer position
   (define last-buf-pos
     (if trunc?
         (end-of-physical-lines gb start-pos rows)
@@ -189,7 +246,6 @@
           (if (null? vlines) start-pos
               (let* ([lv (last vlines)])
                 (+ (visual-line-buf-pos lv) (string-length (visual-line-content lv))))))))
-  ;; Vertical scroll decision
   (define-values (v-start v-hscroll)
     (cond [(< pt-pos start-pos)
            (define nl (gap-scan-byte gb pt-pos 'backward (λ (b) (= b #x0A))))
@@ -200,7 +256,6 @@
            (values (beginning-of-nth-prev-line gb pt-pos target-lines)
                    (if (> hscroll 0) 0 #f))]
           [else (values #f #f)]))
-  ;; Horizontal scroll decision (only for selected windows in truncate mode)
   (define h-new
     (if (and selected? trunc?)
         (let* ([bol (gap-scan-byte gb pt-pos 'backward (λ (b) (= b #x0A)))]
@@ -213,13 +268,11 @@
   (values (or v-start start-pos)
           (or h-new v-hscroll hscroll)))
 
-;; apply-scroll! — write computed scroll to leaf
 (define (apply-scroll! lf start-pos hscroll)
   (define tx (buffer-text (leaf-buffer lf)))
   (text-set-marker-pos! tx (leaf-start lf) start-pos)
   (set-leaf-hscroll! lf hscroll))
 
-;; recenter-point! — compose calc + apply
 (define (recenter-point! lf rect selected?)
   (define buf (leaf-buffer lf))
   (define gb (text-gap (buffer-text buf)))
@@ -229,10 +282,13 @@
   (define cols (rect-cols rect))
   (define-values (new-start new-hscroll)
     (calc-scroll gb pt ws rows cols (leaf-hscroll lf) selected? (truncate-lines? buf)))
-  (apply-scroll! lf new-start new-hscroll))
+  (apply-scroll! lf new-start new-hscroll)
+  ;; If scroll changed, invalidate cache
+  (when (or (not (= new-start ws)) (not (= new-hscroll (leaf-hscroll lf))))
+    (invalidate-leaf-cache! lf)))
 
 ;; ============================================================
-;; update-frame-size! / cache
+;; update-frame-size!
 ;; ============================================================
 
 (define (update-frame-size! frm)
@@ -241,13 +297,8 @@
   (when (or (not (= w (frame-width frm))) (not (= h (frame-height frm))))
     (set-frame-width! frm w) (set-frame-height! frm h)
     (layout-frame! frm)
-    (check-min-size! render-slot frm)))
-
-(define frame-cache-table (make-hasheq))
-
-(define (invalidate-frame-cache! [frm #f])
-  (define f (or frm (current-frame)))
-  (when f (hash-remove! frame-cache-table f)))
+    (invalidate-frame-cache! frm)
+    (check-min-size!)))
 
 ;; ============================================================
 ;; display-frame — main entry
@@ -257,14 +308,16 @@
   (detect-terminal-size!)
   (update-frame-size! frm)
   (init-face-cache!)
-  (when (hash-ref frame-dirty? frm #f)
-    (display format-clear-screen)
-    (hash-remove! frame-dirty? frm))
-  ;; Recenter each leaf
+
+  ;; Phase 1: prepare — recenter, decide what needs update
   (define sel (frame-selected frm))
   (for ([(lf rect) (in-hash (frame-geometry frm))])
     (recenter-point! lf rect (eq? lf sel)))
+
+  ;; Phase 2: generate + compose
   (define-values (new-vb cr cc) (compose-frame! frm))
+
+  ;; Phase 3: flush
   (define cache (hash-ref frame-cache-table frm #f))
   (display format-cursor-hide)
   (flush-vbuffer-delta! new-vb cache)

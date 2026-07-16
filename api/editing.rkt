@@ -1,14 +1,17 @@
 #lang racket
 
 ;; api/editing.rkt — Buffer-modifying commands
+;;
+;; All commands use (buf evt) signature.
+;; Window management (focus, split, delete) is handled separately.
 
 (require "../kernel/buffer.rkt"
          "../kernel/text.rkt"
          "../kernel/gap/query.rkt"
          "../kernel/key-event/key-event.rkt"
          "../kernel/kill-ring/kill-ring.rkt"
-         "../display/window.rkt"
          "../display/render.rkt"
+         "../display/dirty.rkt"
          "../display/layout.rkt"
          "command.rkt")
 
@@ -16,27 +19,22 @@
  cmd-self-insert cmd-newline cmd-tab
  cmd-backward-delete cmd-forward-delete
  cmd-kill-line cmd-yank cmd-yank-pop
- cmd-undo cmd-redo
- cmd-toggle-wrap-mode)
+ cmd-undo cmd-redo cmd-toggle-wrap-mode)
 
-(define-modify-command cmd-self-insert "self-insert" (lf frm evt)
+(define-modify-command cmd-self-insert "self-insert" (buf evt)
   (define ch (key-event-char evt))
   (when ch
-    (define buf (leaf-buffer lf))
     (buffer-insert! buf (string ch) (buffer-point buf))))
 
-(define-modify-command cmd-newline "newline" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-modify-command cmd-newline "newline" (buf evt)
   (define pt (buffer-point buf))
   (buffer-insert! buf "\n" pt)
   (set-buffer-point! buf (add1 pt)))
 
-(define-modify-command cmd-tab "tab" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-modify-command cmd-tab "tab" (buf evt)
   (buffer-insert! buf "\t" (buffer-point buf)))
 
-(define-modify-command cmd-backward-delete "backward-delete" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-modify-command cmd-backward-delete "backward-delete" (buf evt)
   (define pt (buffer-point buf))
   (when (> pt 0)
     (define gb (text-gap (buffer-text buf)))
@@ -44,8 +42,7 @@
     (buffer-delete! buf prev pt)
     (set-buffer-point! buf prev)))
 
-(define-modify-command cmd-forward-delete "forward-delete" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-modify-command cmd-forward-delete "forward-delete" (buf evt)
   (define pt (buffer-point buf))
   (when (< pt (buffer-length buf))
     (define gb (text-gap (buffer-text buf)))
@@ -53,7 +50,7 @@
     (buffer-delete! buf pt next)))
 
 ;; ============================================================
-;; Yank state — module-level, shared between yank / yank-pop
+;; Yank state
 ;; ============================================================
 
 (define yank-start-pos (box #f))
@@ -64,8 +61,7 @@
 ;; kill-line
 ;; ============================================================
 
-(define-modify-command cmd-kill-line "kill-line" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-modify-command cmd-kill-line "kill-line" (buf evt)
   (define gb (text-gap (buffer-text buf)))
   (define pt (buffer-point buf))
   (define len (buffer-length buf))
@@ -88,8 +84,7 @@
 ;; yank
 ;; ============================================================
 
-(define-modify-command cmd-yank "yank" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-modify-command cmd-yank "yank" (buf evt)
   (define text (kill-ring-yank))
   (when (and text (positive? (string-length text)))
     (define pt (buffer-point buf))
@@ -101,36 +96,38 @@
     (set-box! last-was-yank? #t)))
 
 ;; ============================================================
-;; yank-pop — M-y: replace last yanked text with previous kill
+;; yank-pop
 ;; ============================================================
 
-(define-modify-command cmd-yank-pop "yank-pop" (lf frm evt)
+(define-modify-command cmd-yank-pop "yank-pop" (buf evt)
   (unless (unbox last-was-yank?)
     (error 'yank-pop "previous command was not a yank"))
-  (define buf (leaf-buffer lf))
   (define prev-start (unbox yank-start-pos))
   (define prev-end   (unbox yank-end-pos))
-  ;; Delete the previously yanked text
   (when (and prev-start prev-end (> prev-end prev-start))
     (buffer-delete! buf prev-start prev-end))
-  ;; Rotate and insert previous kill
-  (define text (or (kill-ring-pop)
-                   (current-kill)
-                   ""))
+  (define text (or (kill-ring-pop) (current-kill) ""))
   (when (positive? (string-length text))
     (buffer-insert! buf text prev-start)
     (define new-end (+ prev-start (bytes-length (string->bytes/utf-8 text))))
     (set-buffer-point! buf new-end)
     (set-box! yank-end-pos new-end)))
 
-(define-modify-command cmd-undo "undo" (lf frm evt)
-  (buffer-undo! (leaf-buffer lf)))
+;; ============================================================
+;; undo / redo
+;; ============================================================
 
-(define-modify-command cmd-redo "redo" (lf frm evt)
-  (buffer-redo! (leaf-buffer lf)))
+(define-modify-command cmd-undo "undo" (buf evt)
+  (buffer-undo! buf))
 
-(define-command cmd-toggle-wrap-mode "toggle-wrap-mode" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-modify-command cmd-redo "redo" (buf evt)
+  (buffer-redo! buf))
+
+;; ============================================================
+;; toggle-wrap-mode
+;; ============================================================
+
+(define-command cmd-toggle-wrap-mode "toggle-wrap-mode" (buf evt)
   (define new-mode (if (eq? (buffer-wrap-mode buf) 'none) 'char 'none))
   (set-buffer-wrap-mode! buf new-mode)
-  (invalidate-frame-cache! frm))
+  (invalidate-frame-cache!))

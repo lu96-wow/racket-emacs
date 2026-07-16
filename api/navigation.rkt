@@ -2,15 +2,14 @@
 
 ;; api/navigation.rkt — Cursor movement commands
 ;;
-;; All commands receive (leaf frame key-event).  Non-modifying.
-;; Layout/recenter is handled by render, not here.
+;; (buf evt) signature.  Navigation does not modify buffer content,
+;; so no dirty-flag needed (use define-command not define-modify-command).
 
 (require "../kernel/buffer.rkt"
          "../kernel/text.rkt"
          "../kernel/gap/gap.rkt"
          "../kernel/gap/query.rkt"
          "../display/char-width.rkt"
-         "../display/window.rkt"
          "../display/render.rkt"
          "command.rkt")
 
@@ -20,7 +19,7 @@
  cmd-beginning-of-line cmd-end-of-line)
 
 ;; ============================================================
-;; Text-level helpers
+;; Text helpers
 ;; ============================================================
 
 (define (line-beginning gb pos)
@@ -28,7 +27,7 @@
     (if (<= p 0) 0
         (let ([pp (gap-prev-char-pos gb p)])
           (if (char=? (gap-char gb pp) #\newline)
-              (gap-next-char-pos gb pp)
+              p
               (loop pp))))))
 
 (define (line-end gb pos len)
@@ -51,32 +50,27 @@
 ;; Commands
 ;; ============================================================
 
-(define-command cmd-forward-char "forward-char" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-command cmd-forward-char "forward-char" (buf evt)
   (define pt (buffer-point buf))
   (define gb (text-gap (buffer-text buf)))
   (when (< pt (buffer-length buf))
     (set-buffer-point! buf (gap-next-char-pos gb pt))))
 
-(define-command cmd-backward-char "backward-char" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-command cmd-backward-char "backward-char" (buf evt)
   (define pt (buffer-point buf))
   (when (> pt 0)
     (define gb (text-gap (buffer-text buf)))
     (set-buffer-point! buf (gap-prev-char-pos gb pt))))
 
-(define-command cmd-beginning-of-line "beginning-of-line" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-command cmd-beginning-of-line "beginning-of-line" (buf evt)
   (define gb (text-gap (buffer-text buf)))
   (set-buffer-point! buf (line-beginning gb (buffer-point buf))))
 
-(define-command cmd-end-of-line "end-of-line" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-command cmd-end-of-line "end-of-line" (buf evt)
   (define gb (text-gap (buffer-text buf)))
   (set-buffer-point! buf (line-end gb (buffer-point buf) (buffer-length buf))))
 
-(define-command cmd-next-line "next-line" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-command cmd-next-line "next-line" (buf evt)
   (define gb (text-gap (buffer-text buf)))
   (define pt (buffer-point buf))
   (define len (buffer-length buf))
@@ -86,8 +80,7 @@
     (define next-bol (gap-next-char-pos gb eol))
     (set-buffer-point! buf (move-to-column gb next-bol goal-col))))
 
-(define-command cmd-prev-line "prev-line" (lf frm evt)
-  (define buf (leaf-buffer lf))
+(define-command cmd-prev-line "prev-line" (buf evt)
   (define gb (text-gap (buffer-text buf)))
   (define pt (buffer-point buf))
   (define goal-col (display-column buf pt))

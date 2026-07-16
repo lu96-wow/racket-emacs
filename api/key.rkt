@@ -1,40 +1,55 @@
 #lang racket
 
-;; api/key.rkt — Key struct for hash-based dispatch
+;; api/key.rkt — Key abstraction
 ;;
-;; The `key` struct maps terminal events to hash keys for keymap lookup.
-;; `key-event->key` converts a key-event to a key.
+;; A key is a normalized representation of a keyboard event.
+;; Used as hash keys in keymaps.  Deduplicated from kernel/key-event.
 
 (require "../kernel/key-event/key-event.rkt")
 
 (provide
- key? key
- key-type key-value
- key-event->key)
+ ;; key
+ key? key key-prefix key-suffix
+ ;; conversion
+ key-event->key
+ ;; built-in checks
+ self-insert-key?
+ ;; re-export key-event types
+ key-event? key-event-char key-event-ctrl? key-event-meta? key-event-shift?
+ key-event-symbol
+ mouse-event? mouse-event
+ mouse-event-button mouse-event-x mouse-event-y mouse-event-action
+ mouse-event-shift? mouse-event-alt? mouse-event-ctrl?
+ input-event? key-symbol?)
 
 ;; ============================================================
-;; Key struct — hash key for keymaps
+;; Key — normalized key representation
 ;; ============================================================
 
-(struct key (type value) #:transparent
-  #:methods gen:equal+hash
-  [(define (equal-proc a b rec)
-     (and (eq? (key-type a) (key-type b))
-          (equal? (key-value a) (key-value b))))
-   (define (hash-proc a rec)
-     (equal-hash-code (cons (key-type a) (key-value a))))
-   (define (hash2-proc a rec)
-     (equal-secondary-hash-code (cons (key-type a) (key-value a))))])
+(struct key (prefix suffix) #:transparent)
 
-;; ============================================================
-;; key-event → key
-;; ============================================================
+(define (key-event->key ke)
+  (cond [(key-event-symbol ke)
+         (define modifiers
+           (append (if (key-event-ctrl? ke) '(ctrl) '())
+                   (if (key-event-meta? ke) '(meta) '())
+                   (if (key-event-shift? ke) '(shift) '())))
+         (if (null? modifiers)
+             (key 'symbol (key-event-symbol ke))
+             (key 'symbol (cons (key-event-symbol ke) modifiers)))]
+        [(key-event-char ke)
+         (cond [(and (key-event-ctrl? ke) (key-event-char ke))
+                (key 'ctrl (char-downcase (key-event-char ke)))]
+               [(key-event-meta? ke)
+                (key 'meta (key-event-char ke))]
+               [else (key 'char (key-event-char ke))])]
+        [else (key 'unknown #f)]))
 
-(define (key-event->key evt)
-  (cond [(key-event-symbol evt) (key 'symbol (key-event-symbol evt))]
-        [(and (key-event-ctrl? evt) (key-event-char evt))
-         (key 'ctrl (char-downcase (key-event-char evt)))]
-        [(and (key-event-meta? evt) (key-event-char evt))
-         (key 'meta (char-downcase (key-event-char evt)))]
-        [(key-event-char evt) (key 'char (key-event-char evt))]
-        [else (key 'symbol 'unknown)]))
+(define (self-insert-key? ke)
+  (and (key-event? ke)
+       (let ([ch (key-event-char ke)])
+         (and ch
+              (not (key-event-ctrl? ke))
+              (not (key-event-meta? ke))
+              (>= (char->integer ch) 32)
+              (not (char=? ch #\rubout))))))

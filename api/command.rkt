@@ -1,14 +1,12 @@
 #lang racket
 
-;; api/command.rkt — Command protocol
+;; api/command.rkt — Command protocol with dirty-flag integration
 ;;
-;; A command is a named operation with a `modifies?` flag.
-;; The event-loop uses this flag to decide whether to commit
-;; a buffer undo boundary after execution.
-;;
-;; Two constructors:
-;;   define-command         — modifies? = #f (navigation, window)
-;;   define-modify-command  — modifies? = #t (editing, undo/redo)
+;; Commands use (buf evt) signature — they modify buffer, not window.
+;; Window is the event loop's concern (selected-leaf).
+;; Modifying commands set the dirty flag for lazy redisplay.
+
+(require "../display/dirty.rkt")
 
 (provide
  command? command
@@ -21,22 +19,25 @@
 
 (struct command
   (name       ; string
-   fn         ; (leaf frame key-event) -> void
-   modifies?) ; boolean — does this change buffer content?
+   fn         ; (buffer key-event) -> void
+   modifies?) ; boolean
   #:transparent)
 
 ;; ============================================================
-;; define-command — non-modifying (navigation, window ops)
+;; define-command — non-modifying
 ;; ============================================================
 
-(define-syntax-rule (define-command id name (win frm evt) body ...)
+(define-syntax-rule (define-command id name (buf evt) body ...)
   (define id
-    (command name (λ (win frm evt) body ...) #f)))
+    (command name (λ (buf evt) body ...) #f)))
 
 ;; ============================================================
-;; define-modify-command — buffer-modifying (editing, undo/redo)
+;; define-modify-command — buffer-modifying
 ;; ============================================================
 
-(define-syntax-rule (define-modify-command id name (win frm evt) body ...)
+(define-syntax-rule (define-modify-command id name (buf evt) body ...)
   (define id
-    (command name (λ (win frm evt) body ...) #t)))
+    (command name (λ (buf evt)
+                    body ...
+                    (mark-redisplay-needed!))
+             #t)))
