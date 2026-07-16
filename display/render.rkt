@@ -27,6 +27,7 @@
  check-min-size! render-slot
  update-frame-size!
  invalidate-frame-cache!
+ recenter-point!
  ;; re-export
  (all-from-out "layout.rkt")
  (all-from-out "mouse.rkt"))
