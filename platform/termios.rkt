@@ -90,7 +90,7 @@
                  (bitwise-not (bitwise-ior IXON ICRNL INLCR IGNCR))))
   (oflag-set! t (bitwise-and (oflag-ref t)
                  (bitwise-not (bitwise-ior OPOST OCRNL ONLCR))))
-  (set-vmin-vtime! t 0 0)
+  (set-vmin-vtime! t 0 1)  ; VMIN=0 VTIME=1: 100ms poll, non-blocking for escape seq
   (when (not (= 0 (tcsetattr STDIN_FILENO TCSAFLUSH t)))
     (error 'screen-init! "tcsetattr failed — cannot enter raw mode")))
 

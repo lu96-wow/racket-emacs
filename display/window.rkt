@@ -105,7 +105,7 @@
 (define (make-frame buf w h)
   ;; Create a frame with a single leaf viewing BUF.
   (define lf (make-leaf buf))
-  (define frm (frame lf (make-hash) lf w h))
+  (define frm (frame lf (make-hasheq) lf w h))
   (layout-frame! frm)
   frm)
 
@@ -190,7 +190,7 @@
 
 (define (layout-frame! frm)
   (define alist (layout-calc (frame-tree frm) (frame-w frm) (frame-h frm)))
-  (define geo (make-hash))
+  (define geo (make-hasheq))
   (for ([p (in-list alist)])
     (hash-set! geo (car p) (cdr p)))
   (set-frame-rects! frm geo)

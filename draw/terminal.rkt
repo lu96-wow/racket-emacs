@@ -35,7 +35,7 @@
     (flush-row-cells! out cols cells (* r cols) faces-by-id)
     (display format-clear-to-eol out))
 
-  (display (get-output-string out)))
+  (get-output-string out))
 
 ;; ============================================================
 ;; terminal-flush-delta! — row-by-row diff against cache
@@ -57,7 +57,7 @@
       (flush-row-cells! out cols new-cells (* r cols) faces-by-id)
       (display format-clear-to-eol out)))
 
-  (display (get-output-string out)))
+  (get-output-string out))
 
 ;; ============================================================
 ;; flush-row-cells! — ANSI state machine for one row
@@ -146,8 +146,7 @@
       (let ([vb (make-vbuffer 2 5)])
         (vbuffer-put-string! vb 0 0 "hello")
         (vbuffer-put-string! vb 1 0 "world")
-        (define out (with-output-to-string
-                      (λ () (terminal-flush! vb fc))))
+        (define out (terminal-flush! vb fc))
         (check-true (string-contains? out "hello"))
         (check-true (string-contains? out "world"))))
 
@@ -159,8 +158,7 @@
         (vbuffer-put-string! vb2 0 0 "abcde")
         (vbuffer-put-string! vb2 1 0 "fghij")
         (vbuffer-put-string! vb2 2 0 "ZZZZZ")
-        (define out (with-output-to-string
-                      (λ () (terminal-flush-delta! vb2 vb1 fc))))
+        (define out (terminal-flush-delta! vb2 vb1 fc))
         (check-true (string-contains? out "ZZZZZ"))
         (check-false (string-contains? out "abcde"))
         (check-false (string-contains? out "fghij"))))
@@ -171,7 +169,6 @@
         (define kid (face-id-for-name 'keyword fc))
         (vbuffer-put-char! vb 0 0 #\H #:face-id 0)
         (vbuffer-put-char! vb 0 1 #\i #:face-id kid)
-        (define out (with-output-to-string
-                      (λ () (terminal-flush! vb fc))))
+        (define out (terminal-flush! vb fc))
         (check-true (string-contains? out "\e[38"))
         (check-true (string-contains? out "Hi"))))))
