@@ -200,8 +200,8 @@
    (cons (key-ctrl #\r) (edit-cmd cmd-redo))
 
    ;; Word / sexp movement — syntax-table driven (M-f/M-b not in parse layer yet)
-   (cons (key-ctrl #\t) (word-cmd cmd-forward-word))    ;; C-t = forward-word
-   (cons (key-ctrl #\l) (word-cmd cmd-backward-word))   ;; C-l = backward-word
+   (cons (key-ctrl #\t) (word-cmd cmd-forward-word))    ;; C-t = forward-word  (→)
+   (cons (key-ctrl #\l) (word-cmd cmd-backward-word))   ;; C-l = backward-word (←)
    (cons (key-ctrl #\w) (word-cmd cmd-kill-word))       ;; C-w = kill-word
    (cons (key-ctrl #\q) (word-cmd cmd-backward-kill-word))
    (cons (key-ctrl #\s) (word-cmd cmd-forward-sexp))
