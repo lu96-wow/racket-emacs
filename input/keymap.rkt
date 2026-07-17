@@ -21,6 +21,14 @@
  make-keymap
  keymap-lookup
 
+ ;; keymap composition (pure)
+ keymap-merge        ;; base local → merged
+
+ ;; per-buffer keymap storage (analogous to lang/apply's config-table)
+ buffer-keymap-get   ;; buf → keymap | #f
+ buffer-keymap-set!  ;; buf keymap → void
+ buffer-keymap-resolve ;; buf global-km → effective keymap
+
  ;; dispatch
  dispatch-key
 
@@ -46,6 +54,38 @@
 
 (define (keymap-lookup km ke)
   (hash-ref (keymap-table km) ke (λ () #f)))
+
+;; ============================================================
+;; keymap-merge — pure composition (analogous to lang-def->syntax-config)
+;; ============================================================
+
+(define (keymap-merge base local)
+  ;; base  : keymap — fallback (e.g. global keymap)
+  ;; local : keymap — overrides (e.g. buffer-local keymap)
+  ;; → keymap — merged; local wins on conflict
+  ;; Pure — returns a new keymap, neither argument is mutated.
+  (keymap (for/fold ([h (keymap-table base)])
+                    ([(k v) (in-hash (keymap-table local))])
+            (hash-set h k v))))
+
+;; ============================================================
+;; Per-buffer keymap storage (analogous to lang/apply's config-table)
+;; ============================================================
+
+(define buffer-keymap-table (make-hasheq))
+
+(define (buffer-keymap-get buf)
+  (hash-ref buffer-keymap-table buf (λ () #f)))
+
+(define (buffer-keymap-set! buf km)
+  (hash-set! buffer-keymap-table buf km))
+
+(define (buffer-keymap-resolve buf global-km)
+  ;; buf       : buffer?
+  ;; global-km : keymap — fallback when no buffer-local keymap
+  ;; → keymap  — global + buffer-local merged, or just global
+  (define local (buffer-keymap-get buf))
+  (if local (keymap-merge global-km local) global-km))
 
 ;; ============================================================
 ;; Command helpers — wrap kernel/edit + display/window into
@@ -144,4 +184,36 @@
     (check-equal? (dirty-point db2) 1)
     ;; nop-cmd
     (define-values (db3 _frm2 a2?) (nop-cmd db2 #f))
-    (check-false a2?)))
+    (check-false a2?))
+
+  (test-case "keymap-merge: local overrides global"
+    (define global (make-keymap
+                    (cons (key-char #\a) (edit-cmd cmd-forward-char))
+                    (cons (key-char #\b) (edit-cmd cmd-backward-char))))
+    (define local  (make-keymap
+                    (cons (key-char #\a) (edit-cmd cmd-backward-delete))))
+    (define merged (keymap-merge global local))
+    ;; local wins on conflict
+    (define cmd-a (keymap-lookup merged (key-char #\a)))
+    (check-pred procedure? cmd-a)
+    ;; global fallback still present
+    (define cmd-b (keymap-lookup merged (key-char #\b)))
+    (check-pred procedure? cmd-b)
+    ;; key not in either
+    (check-false (keymap-lookup merged (key-char #\z))))
+
+  (test-case "buffer-keymap-resolve"
+    (define global (make-keymap
+                    (cons (key-char #\a) (edit-cmd cmd-forward-char))))
+    (define local  (make-keymap
+                    (cons (key-char #\x) (edit-cmd cmd-backward-delete))))
+    (define buf (make-buffer "*test*" ""))
+    ;; No buffer-local → returns global as-is
+    (define km1 (buffer-keymap-resolve buf global))
+    (check-true (procedure? (keymap-lookup km1 (key-char #\a))))
+    (check-false (keymap-lookup km1 (key-char #\x)))
+    ;; Set buffer-local → merged (local overrides, global still accessible)
+    (buffer-keymap-set! buf local)
+    (define km2 (buffer-keymap-resolve buf global))
+    (check-true (procedure? (keymap-lookup km2 (key-char #\a))))
+    (check-true (procedure? (keymap-lookup km2 (key-char #\x))))))
