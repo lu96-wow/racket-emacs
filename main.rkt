@@ -89,41 +89,42 @@
 
 ;; ============================================================
 ;; ============================================================
-;; Key bindings — pure data: key → command
+;; Global keymap — pure data, constructed once (analogous to lang-def)
 ;; ============================================================
 
-(define global-keymap (make-keymap))
+(define global-keymap
+  (make-keymap
+   ;; Arrow / nav keys
+   (cons (key-sym 'up)        (edit-cmd cmd-prev-line))
+   (cons (key-sym 'down)      (edit-cmd cmd-next-line))
+   (cons (key-sym 'left)      (edit-cmd cmd-backward-char))
+   (cons (key-sym 'right)     (edit-cmd cmd-forward-char))
+   (cons (key-sym 'home)      (edit-cmd cmd-beginning-of-line))
+   (cons (key-sym 'end)       (edit-cmd cmd-end-of-line))
+   (cons (key-sym 'backspace) (edit-cmd cmd-backward-delete))
+   (cons (key-sym 'delete)    (edit-cmd cmd-forward-delete))
+   (cons (key-sym 'return)    (edit-cmd cmd-newline))
+   (cons (key-sym 'tab)       (edit-cmd cmd-tab))
+   (cons (key-sym 'escape)    nop-cmd)
 
-(keymap-set! global-keymap (key-sym 'up)        (edit-cmd cmd-prev-line))
-(keymap-set! global-keymap (key-sym 'down)      (edit-cmd cmd-next-line))
-(keymap-set! global-keymap (key-sym 'left)      (edit-cmd cmd-backward-char))
-(keymap-set! global-keymap (key-sym 'right)     (edit-cmd cmd-forward-char))
-(keymap-set! global-keymap (key-sym 'home)      (edit-cmd cmd-beginning-of-line))
-(keymap-set! global-keymap (key-sym 'end)       (edit-cmd cmd-end-of-line))
-(keymap-set! global-keymap (key-sym 'backspace) (edit-cmd cmd-backward-delete))
-(keymap-set! global-keymap (key-sym 'delete)    (edit-cmd cmd-forward-delete))
-(keymap-set! global-keymap (key-sym 'return)    (edit-cmd cmd-newline))
-(keymap-set! global-keymap (key-sym 'tab)       (edit-cmd cmd-tab))
-(keymap-set! global-keymap (key-sym 'escape)    nop-cmd)
+   ;; Control keys
+   (cons (key-ctrl #\a) (edit-cmd cmd-beginning-of-line))
+   (cons (key-ctrl #\e) (edit-cmd cmd-end-of-line))
+   (cons (key-ctrl #\f) (edit-cmd cmd-forward-char))
+   (cons (key-ctrl #\b) (edit-cmd cmd-backward-char))
+   (cons (key-ctrl #\p) (edit-cmd cmd-prev-line))
+   (cons (key-ctrl #\n) (edit-cmd cmd-next-line))
+   (cons (key-ctrl #\d) (edit-cmd cmd-forward-delete))
+   (cons (key-ctrl #\k) (edit-cmd cmd-kill-line))
+   (cons (key-ctrl #\y) (edit-cmd cmd-yank))
+   (cons (key-ctrl #\_) (edit-cmd cmd-undo))
+   (cons (key-ctrl #\r) (edit-cmd cmd-redo))
 
-;; Control keys
-(keymap-set! global-keymap (key-ctrl #\a) (edit-cmd cmd-beginning-of-line))
-(keymap-set! global-keymap (key-ctrl #\e) (edit-cmd cmd-end-of-line))
-(keymap-set! global-keymap (key-ctrl #\f) (edit-cmd cmd-forward-char))
-(keymap-set! global-keymap (key-ctrl #\b) (edit-cmd cmd-backward-char))
-(keymap-set! global-keymap (key-ctrl #\p) (edit-cmd cmd-prev-line))
-(keymap-set! global-keymap (key-ctrl #\n) (edit-cmd cmd-next-line))
-(keymap-set! global-keymap (key-ctrl #\d) (edit-cmd cmd-forward-delete))
-(keymap-set! global-keymap (key-ctrl #\k) (edit-cmd cmd-kill-line))
-(keymap-set! global-keymap (key-ctrl #\y) (edit-cmd cmd-yank))
-(keymap-set! global-keymap (key-ctrl #\_) (edit-cmd cmd-undo))
-(keymap-set! global-keymap (key-ctrl #\r) (edit-cmd cmd-redo))
-
-;; Window
-(keymap-set! global-keymap (key-ctrl #\v)
-  (window-cmd (λ (frm) (frame-split-leaf! frm 'vertical) frm)))
-(keymap-set! global-keymap (key-ctrl #\o)
-  (window-cmd (λ (frm) (frame-select-next! frm) frm)))
+   ;; Window
+   (cons (key-ctrl #\v)
+         (window-cmd (λ (frm) (frame-split-leaf! frm 'vertical) frm)))
+   (cons (key-ctrl #\o)
+         (window-cmd (λ (frm) (frame-select-next! frm) frm)))))
 
 ;; ============================================================
 ;; Per-leaf row cache management

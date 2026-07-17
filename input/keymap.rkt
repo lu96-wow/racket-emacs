@@ -16,9 +16,9 @@
 (require "key.rkt")
 
 (provide
- ;; keymap
+ ;; keymap — immutable pure data
+ keymap? keymap keymap-table
  make-keymap
- keymap-set!
  keymap-lookup
 
  ;; dispatch
@@ -31,16 +31,21 @@
  nop-cmd)
 
 ;; ============================================================
-;; Keymap — plain hash
+;; Keymap — immutable pure data (analogous to lang-def)
 ;; ============================================================
 
-(define (make-keymap) (make-hash))
+(struct keymap (table) #:transparent)
+;; table : (immutable-hash/c key-event procedure?)
 
-(define (keymap-set! km ke cmd)
-  (hash-set! km ke cmd))
+(define (make-keymap . bindings)
+  ;; bindings : (listof (cons/c key-event procedure?))
+  ;; Build an immutable keymap from a list of (key . cmd) pairs.
+  ;; Pure — no mutation, no side effects.
+  (keymap (for/fold ([h (hash)]) ([p (in-list bindings)])
+            (hash-set h (car p) (cdr p)))))
 
 (define (keymap-lookup km ke)
-  (hash-ref km ke (λ () #f)))
+  (hash-ref (keymap-table km) ke (λ () #f)))
 
 ;; ============================================================
 ;; Command helpers — wrap kernel/edit + display/window into
@@ -93,10 +98,10 @@
            "../kernel/edit.rkt")
 
   (test-case "keymap lookup"
-    (define km (make-keymap))
     (define called? (box #f))
-    (keymap-set! km (key-sym 'up)
-      (λ (db frm) (set-box! called? #t) (values db frm #t)))
+    (define km (make-keymap
+                (cons (key-sym 'up)
+                      (λ (db frm) (set-box! called? #t) (values db frm #t)))))
     (define cmd (keymap-lookup km (key-sym 'up)))
     (check-true (procedure? cmd))
     (define buf (make-buffer "*t*" ""))
@@ -104,9 +109,9 @@
     (check-true (unbox called?)))
 
   (test-case "dispatch: keymap hit"
-    (define km (make-keymap))
-    (keymap-set! km (key-ctrl #\a)
-      (λ (db frm) (values db frm #t)))
+    (define km (make-keymap
+                (cons (key-ctrl #\a)
+                      (λ (db frm) (values db frm #t)))))
     (define buf (make-buffer "*t*" "hello"))
     (define db  (make-dirty-buffer buf))
     (define-values (db2 _frm acted?)
