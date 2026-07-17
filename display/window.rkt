@@ -334,10 +334,10 @@
     (set-frame-selected! frm lf)))
 
 (define (frame-select-next! frm)
-  (set-frame-selected! frm (next-leaf frm)))
+  (frame-select! frm (next-leaf frm)))
 
 (define (frame-select-prev! frm)
-  (set-frame-selected! frm (prev-leaf frm)))
+  (frame-select! frm (prev-leaf frm)))
 
 ;; ============================================================
 ;; frame-resize! — update dimensions + relayout

@@ -82,7 +82,7 @@
    "\n"
    ";; Keys:\n"
    ";;   arrows  — move cursor\n"
-   ";;   p       — split window (same buffer)\n"
+   ";;   C-v       — split window (same buffer)\n"
    ";;   other   — insert character\n"
    ";;   C-c     — quit\n"
    "\n"))
@@ -120,7 +120,7 @@
 (keymap-set! global-keymap (key-ctrl #\r) (edit-cmd cmd-redo))
 
 ;; Window
-(keymap-set! global-keymap (key-char #\p)
+(keymap-set! global-keymap (key-ctrl #\v)
   (window-cmd (λ (frm) (frame-split-leaf! frm 'vertical) frm)))
 (keymap-set! global-keymap (key-ctrl #\o)
   (window-cmd (λ (frm) (frame-select-next! frm) frm)))
