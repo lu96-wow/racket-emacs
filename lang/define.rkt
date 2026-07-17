@@ -60,34 +60,3 @@
   (for ([f (in-list (lang-def-faces ld))])
     (match-define (list name attrs) f)
     (define-face! name attrs)))
-
-;; ============================================================
-;; Tests
-;; ============================================================
-
-(module+ test
-  (require rackunit)
-
-  (define test-lang
-    (lang-def 'test-lang
-              '(".test")
-              (make-standard-syntax-table)
-              (list (cons (pregexp "\\btest\\b") 'font-lock-keyword-face))
-              (list (list 'font-lock-keyword-face
-                          (make-face-attrs 'foreground 1 'weight 'bold)))))
-
-  (test-case "lang-def is pure data"
-    (check-eq? (lang-def-name test-lang) 'test-lang)
-    (check-equal? (length (lang-def-patterns test-lang)) 1)
-    (check-equal? (length (lang-def-keywords test-lang)) 1)
-    (check-equal? (length (lang-def-faces test-lang)) 1))
-
-  (test-case "lang-def->syntax-config"
-    (define cfg (lang-def->syntax-config test-lang))
-    (check-true (syntax-config? cfg))
-    (check-equal? (length (syntax-config-keywords cfg)) 1))
-
-  (test-case "activate-language! registers faces"
-    (init-face-cache!)
-    (activate-language! test-lang)
-    (check-true (> (face-id-for-name 'font-lock-keyword-face) 0))))

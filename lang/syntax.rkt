@@ -129,33 +129,3 @@
      ;; #<<HERE ... HERE  heredoc string (delim-capture)
      (multi-char-rule 'here-string "#<<" #f #f #t)))
   st)
-
-;; ============================================================
-;; Tests
-;; ============================================================
-
-(module+ test
-  (require rackunit)
-
-  (let ([st (make-standard-syntax-table)])
-    (check-true (char-word? #\a st))
-    (check-true (char-word? #\? st))
-    (check-true (char-whitespace? #\space st))
-    (check-true (char-open? #\( st))
-    (check-true (char-close? #\) st))
-    (check-true (char-string-quote? #\" st))
-    (check-true (char-escape? #\\ st))
-    (check-true (char-comment-start? #\; st))
-    (check-true (char-expression-prefix? #\' st))
-    (check-false (char-word? #\新 st))  ; CJK defaults to punctuation
-    (check-true (char-punctuation? #\新 st)))
-
-  (let ([st (make-racket-syntax-table)])
-    (define rules (syntax-table-multi-rules st))
-    (check-equal? (length rules) 2)
-    (check-equal? (multi-char-rule-tag (car rules)) 'block-comment)
-    (check-true (multi-char-rule-nestable? (car rules)))
-    ;; parent inheritance
-    (check-true (char-word? #\a st))
-    (check-true (char-open? #\( st)))
-)

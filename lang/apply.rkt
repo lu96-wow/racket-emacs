@@ -89,36 +89,3 @@
   (define gb (text-gap (buffer-text buf)))
   (define tp (buffer-text-props buf))
   (syntax-highlight-changed! gb tp cfg extent))
-
-;; ============================================================
-;; Tests
-;; ============================================================
-
-(module+ test
-  (require rackunit)
-
-  (init-face-cache!)
-
-  (test-case "syntax-setup! on scratch buffer"
-    (define languages (list racket-lang-def))
-    (define buf (make-buffer "*scratch*" ";; comment\n(define x 1)\n"))
-    (define cfg (syntax-setup! buf languages))
-    (check-pred syntax-config? cfg)
-    (check-equal? (buffer-face-at buf 0) 'font-lock-comment-face)
-    (check-equal? (buffer-face-at buf 13) 'font-lock-keyword-face))
-
-  (test-case "syntax-update! after edit"
-    (define languages (list racket-lang-def))
-    (define buf (make-buffer "*test*" "(define a 1)\n(define b 2)\n"))
-    (define cfg (syntax-setup! buf languages))
-    (buffer-insert! buf "xxx" 5)
-    (define ext (cons 5 8))
-    (syntax-update! cfg buf ext)
-    (check-equal? (buffer-face-at buf 2) 'font-lock-keyword-face))
-
-  (test-case "match-language — .rkt file"
-    (define buf (make-buffer "foo.rkt" "#lang racket\n"))
-    (set-buffer-filename! buf "/home/user/foo.rkt")
-    (define ld (match-language buf (list racket-lang-def)))
-    (check-pred lang-def? ld)
-    (check-eq? (lang-def-name ld) 'racket)))

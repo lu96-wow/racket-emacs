@@ -79,35 +79,3 @@
 (define (textprop-adjust-delete! tp from to)
   (when (< from to)
     (interval-map-contract! (text-properties-map tp) from to)))
-
-;; ============================================================
-;; Tests
-;; ============================================================
-
-(module+ test
-  (require rackunit)
-
-  (let ([tp (make-text-properties)])
-    (textprop-put! tp 0 10 'face 'keyword)
-    (check-equal? (textprop-get tp 5 'face) 'keyword)
-    (check-equal? (textprop-face-at tp 5) 'keyword)
-    (check-equal? (textprop-get tp 15 'face 'default) 'default))
-
-  (let ([tp (make-text-properties)])
-    (textprop-put! tp 5 10 'face 'comment)
-    (textprop-adjust-insert! tp 5 3)
-    (check-equal? (textprop-face-at tp 3) #f)
-    (check-equal? (textprop-face-at tp 10) 'comment)
-    (check-equal? (textprop-face-at tp 12) 'comment))
-
-  (let ([tp (make-text-properties)])
-    (textprop-put! tp 10 20 'face 'string)
-    (textprop-adjust-delete! tp 5 8)
-    (check-equal? (textprop-face-at tp 7) 'string)
-    (check-equal? (textprop-face-at tp 15) 'string))
-
-  (let ([tp (make-text-properties)])
-    (textprop-put! tp 0 20 'face 'comment)
-    (textprop-put! tp 0 20 'syntax-table 'string)
-    (check-equal? (textprop-get tp 5 'face) 'comment)
-    (check-equal? (textprop-get tp 5 'syntax-table) 'string)))

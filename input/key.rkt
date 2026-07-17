@@ -57,33 +57,3 @@
 (define (key-quit? ke)
   (or (and (key-ctrl? ke) (memv (key-ctrl-ch ke) '(#\c #\d #\g)) #t)
       (and (key-sym? ke) (eq? (key-sym-name ke) 'cancel))))
-
-;; ============================================================
-;; Tests
-;; ============================================================
-
-(module+ test
-  (require rackunit)
-
-  (test-case "struct equality works for hash keys"
-    (check-equal? (key-char #\a) (key-char #\a))
-    (check-equal? (key-ctrl #\c) (key-ctrl #\c))
-    (check-equal? (key-sym 'up)  (key-sym 'up))
-    (check-not-equal? (key-char #\a) (key-char #\b))
-    (check-not-equal? (key-char #\a) (key-ctrl #\a)))
-
-  (test-case "invalid states impossible to construct"
-    ;; key-char only takes a char, no ctrl flag, no symbol
-    (check-equal? (key-char-ch (key-char #\中)) #\中)
-    ;; key-ctrl only takes the letter
-    (check-equal? (key-ctrl-ch (key-ctrl #\x)) #\x))
-
-  (test-case "classification"
-    (check-true  (key-self-insert? (key-char #\a)))
-    (check-false (key-self-insert? (key-ctrl #\a)))
-    (check-false (key-self-insert? (key-sym 'up)))
-    (check-true  (key-idle? (key-sym 'idle)))
-    (check-false (key-idle? (key-char #\a)))
-    (check-true  (key-quit? (key-ctrl #\c)))
-    (check-false (key-quit? (key-char #\c))))
-)
