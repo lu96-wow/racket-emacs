@@ -163,7 +163,7 @@
       (define tp  (buffer-text-props buf))
 
       ;; --- Scroll: keep point visible ---
-      (define pt (buffer-point buf))
+      (define pt (marker-pos (leaf-point lf)))
       (define ws (marker-pos (leaf-start lf)))
       (define rows (rect-rows geo))
       (define cols (rect-cols geo))

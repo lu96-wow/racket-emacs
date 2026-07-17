@@ -51,6 +51,10 @@
  ;; ── scroll (pure result → apply to leaf markers) ──
  apply-scroll!
 
+ ;; ── per-leaf point management ──
+ detach-leaf-point!   ;; leaf → independent marker (for deselected leaf)
+ attach-leaf-point!    ;; leaf → share buffer-point-marker (for selected leaf)
+
  ;; ── apply (side effects on frame) ──
  layout-frame! init-frame
  frame-split-leaf! frame-delete-leaf! frame-delete-other-leaves!
@@ -97,12 +101,14 @@
 ;; ============================================================
 
 (define (make-leaf buf)
-  ;; Create a leaf viewing BUF.  Allocates fresh start/point markers
-  ;; in the buffer's text.  start = point = 0 initially.
+  ;; Create a leaf viewing BUF.
+  ;; The point marker IS buffer-point-marker — mutations to buffer-point
+  ;; directly affect the selected leaf's cursor.  When deselected, the
+  ;; leaf gets its own independent marker via detach-leaf-point!.
   (define tx (buffer-text buf))
   (leaf buf
-        (text-marker! tx 0 #f)   ; start: insertion-type = #f
-        (text-marker! tx 0 #t)   ; point: insertion-type = #t (stay after inserts)
+        (text-marker! tx 0 #f)               ; start: insertion-type = #f
+        (buffer-point-marker buf)             ; point: same object as buffer's
         0))
 
 (define (make-frame buf w h)
@@ -259,8 +265,8 @@
   (define inner (split direction (list old new)))
   (set-frame-tree! frm (replace-in-tree (frame-tree frm) old inner))
   (layout-frame! frm)
-  ;; Select the new leaf
-  (set-frame-selected! frm new)
+  ;; Select the new leaf (handles detach/attach of point markers)
+  (frame-select! frm new)
   new)
 
 ;; ============================================================
@@ -291,11 +297,40 @@
   (set-frame-selected! frm sel))
 
 ;; ============================================================
+;; detach-leaf-point! — give leaf its own independent marker
+;; ============================================================
+
+(define (detach-leaf-point! lf)
+  ;; Called when a leaf LOSES focus.  Allocates a fresh marker
+  ;; at the current buffer-point position so the leaf keeps its
+  ;; cursor position independently.
+  (define buf (leaf-buffer lf))
+  (define tx  (buffer-text buf))
+  (define old-pos (text-marker-pos tx (leaf-point lf)))
+  (set-leaf-point! lf (text-marker! tx old-pos #t)))
+
+;; ============================================================
+;; attach-leaf-point! — share buffer's point-marker
+;; ============================================================
+
+(define (attach-leaf-point! lf)
+  ;; Called when a leaf GAINS focus.  Its point marker becomes
+  ;; the buffer's point-marker, so edit commands directly affect
+  ;; this leaf's cursor position.
+  (define buf (leaf-buffer lf))
+  (define tx  (buffer-text buf))
+  (set-leaf-point! lf (buffer-point-marker buf)))
+
+;; ============================================================
 ;; Focus operations
 ;; ============================================================
 
 (define (frame-select! frm lf)
-  (when (memq lf (focus-list (frame-tree frm)))
+  (when (and (memq lf (focus-list (frame-tree frm)))
+             (not (eq? lf (frame-selected frm))))
+    (when (frame-selected frm)
+      (detach-leaf-point! (frame-selected frm)))
+    (attach-leaf-point! lf)
     (set-frame-selected! frm lf)))
 
 (define (frame-select-next! frm)
