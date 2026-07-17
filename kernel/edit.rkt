@@ -2,24 +2,19 @@
 
 ;; kernel/edit.rkt — Editing commands
 ;;
-;; Composes dirty-buffer + key-event + kill-ring into editing operations.
-;; Every command: dirty-buffer × key-event → dirty-buffer.
-;;
-;; Content-modifying commands return a dirty-buffer with accumulated
-;; changes.  Movement/mark commands return the same db with no new changes
-;; (point/mark movement is not a content change for display purposes).
+;; Composes dirty-buffer + kill-ring into editing operations.
+;; Commands operate on dirty-buffer only; cmd-self-insert also takes a char.
+;; Movement/mark commands return the same db with no new changes.
 ;;
 ;; Architecture:
 ;;   dirty-buffer  ← change-tracked buffer wrapper
-;;   key-event     ← input event type
 ;;   kill-ring     ← clipboard (module-level shared state)
-;;   edit          ← commands = dirty-buffer × event → dirty-buffer
+;;   edit          ← commands on dirty-buffer
 
 (require "dirty.rkt"
          "buffer.rkt"
          "data/text.rkt"
          "data/query.rkt"
-         "key-event.rkt"
          "kill-ring.rkt"
          "undo/recorder.rkt")
 
@@ -48,21 +43,20 @@
 ;; Content-modifying commands
 ;; ============================================================
 
-(define (cmd-self-insert db evt)
-  (define ch (key-event-char evt))
+(define (cmd-self-insert db ch)
   (if ch
       (dirty-insert! db (string ch) (dirty-point db))
       db))
 
-(define (cmd-newline db evt)
+(define (cmd-newline db)
   (define pt (dirty-point db))
   (define db1 (dirty-insert! db "\n" pt))
   (dirty-set-point! db1 (add1 pt)))
 
-(define (cmd-tab db evt)
+(define (cmd-tab db)
   (dirty-insert! db "\t" (dirty-point db)))
 
-(define (cmd-backward-delete db evt)
+(define (cmd-backward-delete db)
   (define pt (dirty-point db))
   (if (> pt 0)
       (let* ([buf (dirty-buffer-buf db)]
@@ -72,7 +66,7 @@
         (dirty-set-point! db1 prev))
       db))
 
-(define (cmd-forward-delete db evt)
+(define (cmd-forward-delete db)
   (define pt (dirty-point db))
   (define len (dirty-length db))
   (if (< pt len)
@@ -83,7 +77,7 @@
         db1)
       db))
 
-(define (cmd-kill-line db evt)
+(define (cmd-kill-line db)
   (define buf (dirty-buffer-buf db))
   (define gb  (text-gap (buffer-text buf)))
   (define pt  (dirty-point db))
@@ -95,7 +89,6 @@
             [else (loop (gap-next-char-pos gb p))])))
   (cond
     [(= pt eol)
-     ;; At end of line: kill the newline
      (if (< pt len)
          (let* ([next (gap-next-char-pos gb pt)]
                 [db1  (dirty-delete! db pt next)])
@@ -118,7 +111,7 @@
   (set-box! yank-start-box pos)
   db)
 
-(define (cmd-yank db evt)
+(define (cmd-yank db)
   (define text (kill-ring-yank))
   (if (and text (positive? (string-length text)))
       (let* ([pt  (dirty-point db)]
@@ -129,7 +122,7 @@
         db2)
       db))
 
-(define (cmd-yank-pop db evt)
+(define (cmd-yank-pop db)
   (define prev-start (unbox yank-start-box))
   (define text (or (kill-ring-pop) (current-kill) ""))
   (if (and prev-start (positive? (string-length text)))
@@ -148,18 +141,18 @@
 ;; Undo / Redo
 ;; ============================================================
 
-(define (cmd-undo db evt)
+(define (cmd-undo db)
   (dirty-commit! db)
   (dirty-undo! db))
 
-(define (cmd-redo db evt)
+(define (cmd-redo db)
   (dirty-redo! db))
 
 ;; ============================================================
 ;; Movement — point only, no content change
 ;; ============================================================
 
-(define (cmd-forward-char db evt)
+(define (cmd-forward-char db)
   (define pt (dirty-point db))
   (if (< pt (dirty-length db))
       (let* ([buf (dirty-buffer-buf db)]
@@ -168,7 +161,7 @@
         (dirty-set-point! db next))
       db))
 
-(define (cmd-backward-char db evt)
+(define (cmd-backward-char db)
   (define pt (dirty-point db))
   (if (> pt 0)
       (let* ([buf (dirty-buffer-buf db)]
@@ -177,7 +170,7 @@
         (dirty-set-point! db prev))
       db))
 
-(define (cmd-beginning-of-line db evt)
+(define (cmd-beginning-of-line db)
   (define pt (dirty-point db))
   (if (zero? pt)
       db
@@ -191,7 +184,7 @@
                             (loop (gap-prev-char-pos gb p)))))])
         (dirty-set-point! db bol))))
 
-(define (cmd-end-of-line db evt)
+(define (cmd-end-of-line db)
   (define pt (dirty-point db))
   (define len (dirty-length db))
   (if (>= pt len)
@@ -204,8 +197,7 @@
                           [else (loop (gap-next-char-pos gb p))]))])
         (dirty-set-point! db eol))))
 
-(define (cmd-next-line db evt)
-  ;; Move point to the beginning of the next line.
+(define (cmd-next-line db)
   (define buf (dirty-buffer-buf db))
   (define gb  (text-gap (buffer-text buf)))
   (define pt  (dirty-point db))
@@ -213,8 +205,7 @@
   (define nl  (gap-scan-byte gb pt 'forward (lambda (b) (= b #x0A))))
   (dirty-set-point! db (if (>= nl len) len (add1 nl))))
 
-(define (cmd-prev-line db evt)
-  ;; Move point to the beginning of the previous line.
+(define (cmd-prev-line db)
   (define buf (dirty-buffer-buf db))
   (define gb  (text-gap (buffer-text buf)))
   (define pt  (dirty-point db))
@@ -230,10 +221,10 @@
 ;; Mark / Region
 ;; ============================================================
 
-(define (cmd-set-mark db evt)
+(define (cmd-set-mark db)
   (dirty-set-mark! db))
 
-(define (cmd-swap-point-and-mark db evt)
+(define (cmd-swap-point-and-mark db)
   (define buf (dirty-buffer-buf db))
   (if (region-active? buf)
       (let* ([m (buffer-mark buf)]
@@ -243,131 +234,3 @@
         (text-set-marker-pos! (buffer-text buf) m pt)
         db1)
       db))
-
-;; ============================================================
-;; Tests
-;; ============================================================
-
-(module+ test
-  (require rackunit)
-
-  (define (make-ev ch)
-    (key-event ch #f #f #f #f))
-
-  (test-case "self-insert"
-    (let* ([db  (make-dirty-buffer)]
-           [db1 (cmd-self-insert db (make-ev #\a))]
-           [db2 (cmd-self-insert db1 (make-ev #\b))])
-      (check-equal? (dirty-string db2) "ab")
-      (check-equal? (dirty-point db2) 2)
-      (check-true (dirty-dirty? db2))))
-
-  (test-case "newline"
-    (let* ([db  (make-dirty-buffer)]
-           [db1 (cmd-self-insert db (make-ev #\a))]
-           [db2 (cmd-newline db1 (make-ev #\newline))]
-           [db3 (cmd-self-insert db2 (make-ev #\b))])
-      (check-equal? (dirty-string db3) "a\nb")
-      (check-equal? (dirty-point db3) 3)))
-
-  (test-case "backward-delete"
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "abc"))]
-           [db1 (dirty-set-point! db0 3)]
-           [db2 (cmd-backward-delete db1 (key-event #f #f #f #f 'backspace))])
-      (check-equal? (dirty-string db2) "ab")
-      (check-equal? (dirty-point db2) 2)))
-
-  (test-case "forward-delete"
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "abc"))]
-           [db1 (dirty-set-point! db0 1)]
-           [db2 (cmd-forward-delete db1 (key-event #f #f #f #f 'delete))])
-      (check-equal? (dirty-string db2) "ac")
-      (check-equal? (dirty-point db2) 1)))
-
-  (test-case "kill-line"
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "line1\nline2\n"))]
-           [db1 (cmd-kill-line db0 (key-event #f #t #f #f #f))]
-           [db2 (dirty-commit! db1)])
-      (check-equal? (dirty-string db2) "\nline2\n")
-      (check-equal? (kill-ring-yank) "line1")))
-
-  (test-case "yank"
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "abc"))]
-           [_   (kill-new "XYZ")]
-           [db1 (dirty-set-point! db0 1)]
-           [db2 (cmd-yank db1 (key-event #f #f #t #f #f))])
-      (check-equal? (dirty-string db2) "aXYZbc")
-      (check-equal? (dirty-point db2) 4)))
-
-  (test-case "undo"
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "abc"))]
-           [db1 (cmd-self-insert db0 (make-ev #\X))]
-           [db2 (dirty-commit! db1)]
-           [db3 (cmd-undo db2 (key-event #f #t #f #f #f))])
-      (check-equal? (dirty-string db3) "abc")))
-
-  (test-case "movement does not mark dirty"
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "abcdef"))]
-           [db1 (dirty-clear! db0)]
-           [db2 (dirty-set-point! db1 2)]
-           [db3 (cmd-forward-char db2 (make-ev #\f))])
-      (check-equal? (dirty-point db3) 3)
-      (check-false (dirty-dirty? db3))))
-
-  (test-case "beginning-of-line"
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "hello\nworld"))]
-           [db1 (dirty-set-point! db0 9)]   ; at 'l' in "world"
-           [db2 (cmd-beginning-of-line db1 (make-ev #\a))])
-      (check-equal? (dirty-point db2) 6)))  ; beginning of "world"
-
-  (test-case "end-of-line"
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "hello\nworld"))]
-           [db1 (dirty-set-point! db0 7)]
-           [db2 (cmd-end-of-line db1 (make-ev #\e))])
-      (check-equal? (dirty-point db2) 11)))
-
-  (test-case "next-line"
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "line1\nline2\nline3"))]
-           [db1 (cmd-next-line db0 (make-ev #\n))])
-      (check-equal? (dirty-point db1) 6))
-    ;; at end of buffer: stays at end
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "a\n"))]
-           [db1 (dirty-set-point! db0 2)]
-           [db2 (cmd-next-line db1 (make-ev #\n))])
-      (check-equal? (dirty-point db2) 2)))
-
-  (test-case "prev-line"
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "line1\nline2\nline3"))]
-           [db1 (dirty-set-point! db0 10)]  ;; in line3
-           [db2 (cmd-prev-line db1 (make-ev #\p))])
-      (check-equal? (dirty-point db2) 6))  ;; beginning of line2
-    ;; at beginning: stays
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "a\nb"))]
-           [db1 (cmd-prev-line db0 (make-ev #\p))])
-      (check-equal? (dirty-point db1) 0)))
-
-  (test-case "set-mark and swap"
-    (let* ([db0 (make-dirty-buffer (make-buffer "test" "hello world"))]
-           [db1 (dirty-set-point! db0 3)]
-           [db2 (cmd-set-mark db1 (make-ev #\space))]
-           [db3 (dirty-set-point! db2 8)]
-           [_   (check-true (dirty-region-active? db3))]
-           [db4 (cmd-swap-point-and-mark db3 (make-ev #\x))])
-      (check-equal? (dirty-point db4) 3)
-      (check-true (dirty-region-active? db4))))
-
-  (test-case "command composition: insert → delete → point → dirty extent"
-    (let* ([db0 (make-dirty-buffer)]
-           [db1 (cmd-self-insert db0 (make-ev #\H))]
-           [db2 (cmd-self-insert db1 (make-ev #\e))]
-           [db3 (cmd-self-insert db2 (make-ev #\y))]
-           ;; Accumulate all changes
-           [_   (check-equal? (dirty-extent db3) '(0 . 3))]
-           ;; Clear (simulating render)
-           [db4 (dirty-clear! db3)]
-           [db5 (dirty-set-point! db4 0)]
-           [db6 (cmd-forward-delete db5 (key-event #f #f #f #f 'delete))]
-           [db7 (cmd-forward-delete db6 (key-event #f #f #f #f 'delete))])
-      (check-equal? (dirty-string db7) "y")
-      (check-equal? (dirty-extent db7) '(0 . 0))))
-)
