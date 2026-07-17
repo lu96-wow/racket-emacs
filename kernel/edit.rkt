@@ -35,6 +35,9 @@
  cmd-beginning-of-line cmd-end-of-line
  cmd-next-line cmd-prev-line
 
+ ;; line helpers (pure)
+ line-beginning line-end
+
  ;; mark / region
  cmd-set-mark cmd-swap-point-and-mark
  )
@@ -170,18 +173,38 @@
         (dirty-set-point! db prev))
       db))
 
+;; ============================================================
+;; Line helpers
+;; ============================================================
+
+(define (line-beginning gb pt)
+  ;; Return byte-position of the first character on the line containing pt.
+  (let loop ([p (gap-prev-char-pos gb pt)])
+    (if (zero? p)
+        0
+        (if (char=? (gap-char gb p) #\newline)
+            (gap-next-char-pos gb p)
+            (loop (gap-prev-char-pos gb p))))))
+
+(define (line-end gb pt len)
+  ;; Return byte-position of the last character on the line containing pt
+  ;; (the newline or buffer-end).
+  (let loop ([p pt])
+    (cond [(>= p len) len]
+          [(char=? (gap-char gb p) #\newline) p]
+          [else (loop (gap-next-char-pos gb p))])))
+
+;; ============================================================
+;; Cursor movement — simple
+;; ============================================================
+
 (define (cmd-beginning-of-line db)
   (define pt (dirty-point db))
   (if (zero? pt)
       db
       (let* ([buf (dirty-buffer-buf db)]
              [gb  (text-gap (buffer-text buf))]
-             [bol (let loop ([p (gap-prev-char-pos gb pt)])
-                    (if (zero? p)
-                        0
-                        (if (char=? (gap-char gb p) #\newline)
-                            (gap-next-char-pos gb p)
-                            (loop (gap-prev-char-pos gb p)))))])
+             [bol (line-beginning gb pt)])
         (dirty-set-point! db bol))))
 
 (define (cmd-end-of-line db)
@@ -191,10 +214,7 @@
       db
       (let* ([buf (dirty-buffer-buf db)]
              [gb  (text-gap (buffer-text buf))]
-             [eol (let loop ([p pt])
-                    (cond [(>= p len) len]
-                          [(char=? (gap-char gb p) #\newline) p]
-                          [else (loop (gap-next-char-pos gb p))]))])
+             [eol (line-end gb pt len)])
         (dirty-set-point! db eol))))
 
 (define (cmd-next-line db)
@@ -206,16 +226,19 @@
   (dirty-set-point! db (if (>= nl len) len (add1 nl))))
 
 (define (cmd-prev-line db)
+  ;; Original algorithm: find BOL, step one char back (the \n),
+  ;; then line-beginning from there → previous line's BOL.
   (define buf (dirty-buffer-buf db))
   (define gb  (text-gap (buffer-text buf)))
   (define pt  (dirty-point db))
   (if (zero? pt)
       db
-      (let ([nl (gap-scan-byte gb (sub1 pt)
-                    'backward (lambda (b) (= b #x0A)))])
-        (if (< nl 0)
+      (let* ([bol (line-beginning gb pt)])
+        (if (zero? bol)
             (dirty-set-point! db 0)
-            (dirty-set-point! db (add1 nl))))))
+            (let* ([prev-end (gap-prev-char-pos gb bol)]
+                   [prev-bol (line-beginning gb prev-end)])
+              (dirty-set-point! db prev-bol))))))
 
 ;; ============================================================
 ;; Mark / Region
