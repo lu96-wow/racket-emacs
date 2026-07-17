@@ -46,31 +46,27 @@
 ;; ============================================================
 ;; Word scanning — Emacs-compatible forward-word / backward-word
 ;; ============================================================
-;; forward-word: skip word-chars → skip punctuation → skip whitespace → stop
-;; backward-word: skip whitespace backward → skip punctuation → skip word-chars backward
+;; forward-word:  on word → end of this word | not on word → skip → end of next word
+;; backward-word: on word → start of this word | not on word → skip → start of prev word
 
-(define (scan-word-forward gb pos len st #:skip-ws? [skip-ws? #t])
+(define (scan-word-forward gb pos len st)
   (define word? (λ (ch) (char-word? ch st)))
-  (define punct? (λ (ch) (and (not (char-word? ch st))
-                              (not (char-whitespace? ch st)))))
-  (define after-word  (skip-while-forward gb pos len word?))
-  (define after-punct (skip-while-forward gb after-word len punct?))
-  (if skip-ws?
-      (skip-while-forward gb after-punct len
-        (λ (ch) (char-whitespace? ch st)))
-      after-punct))
+  (define non-word? (λ (ch) (not (char-word? ch st))))
+  (if (and (< pos len) (char-word? (gap-char gb pos) st))
+      (skip-while-forward gb pos len word?)
+      (let* ([after-non  (skip-while-forward gb pos len non-word?)]
+             [after-word (skip-while-forward gb after-non len word?)])
+        after-word)))
 
-(define (scan-word-backward gb pos st #:skip-ws? [skip-ws? #t])
-  (define ws? (λ (ch) (char-whitespace? ch st)))
+(define (scan-word-backward gb pos st)
   (define word? (λ (ch) (char-word? ch st)))
-  (define punct? (λ (ch) (and (not (char-word? ch st))
-                              (not (char-whitespace? ch st)))))
-  (define before-ws
-    (if skip-ws?
-        (skip-while-backward gb pos ws?)
-        pos))
-  (define before-punct (skip-while-backward gb before-ws punct?))
-  (skip-while-backward gb before-punct word?))
+  (define non-word? (λ (ch) (not (char-word? ch st))))
+  (define ch (and (> pos 0) (gap-char gb (gap-prev-char-pos gb pos))))
+  (if (and ch (char-word? ch st))
+      (skip-while-backward gb pos word?)
+      (let* ([after-non  (skip-while-backward gb pos non-word?)]
+             [after-word (skip-while-backward gb after-non word?)])
+        after-word)))
 
 ;; ============================================================
 ;; Symbol scanning — like word but also includes symbol-constituent
