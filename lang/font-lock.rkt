@@ -38,7 +38,10 @@
 
  ;; orchestration
  syntax-highlight-region!
- syntax-highlight-changed!)
+ syntax-highlight-changed!
+
+ ;; region extension (shared with bracket-cache)
+ extend-change-region)
 
 ;; ============================================================
 ;; Config
@@ -210,7 +213,7 @@
 (define (syntax-highlight-region! gb tp config beg end)
   ;; Clear old faces + run passes for the given region.
   (when (and config (< beg end))
-    (textprop-remove! tp beg end)
+    (textprop-remove-key! tp beg end 'face)
     (when (syntax-config-syntax-table config)
       (syntax-scan! gb tp (syntax-config-syntax-table config) beg end))
     (when (pair? (syntax-config-keywords config))
@@ -219,33 +222,29 @@
                      beg end
                      (syntax-config-case-fold? config)))))
 
-(define (syntax-highlight-changed! gb tp config change-extent)
-  ;; Incremental: extend change region to catch multi-line constructs,
-  ;; then highlight.  Line comments need the comment-start char (;) to
-  ;; be within the scan range; when no newline exists between the edit
-  ;; point and the comment marker (same line), we fall back to buffer start.
-  (match-define (cons start end) change-extent)
+(define (extend-change-region gb start end #:line-count [lines 15])
+  ;; Extend a change extent backward/forward by `lines` to catch
+  ;; multi-line constructs (line comments, bracket nesting, etc.).
+  ;; Returns (cons sol eol).
   (define buflen (gap-length gb))
-
-  ;; Extend backward up to 15 lines.  If no newline found (first line
-  ;; of buffer), go to position 0 to catch comment-start chars.
   (define sol
-    (let loop ([pos start] [remaining 15])
+    (let loop ([pos start] [remaining lines])
       (if (or (zero? pos) (zero? remaining))
           pos
           (let ([prev-nl (gap-scan-byte gb (sub1 pos) 'backward
                                         (λ (b) (= b #x0A)))])
             (if (>= prev-nl 0)
                 (loop (add1 prev-nl) (sub1 remaining))
-                ;; No newline before edit point — scan from buffer start
                 0)))))
-
-  ;; Extend forward up to 15 lines
   (define eol
-    (let loop ([pos end] [remaining 15])
+    (let loop ([pos end] [remaining lines])
       (define nl (gap-scan-byte gb pos 'forward (λ (b) (= b #x0A))))
       (if (or (>= nl buflen) (zero? remaining))
           (min nl buflen)
           (loop (add1 nl) (sub1 remaining)))))
+  (cons sol eol))
 
+(define (syntax-highlight-changed! gb tp config change-extent)
+  (match-define (cons start end) change-extent)
+  (match-define (cons sol eol) (extend-change-region gb start end))
   (syntax-highlight-region! gb tp config sol eol))

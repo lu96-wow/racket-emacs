@@ -74,7 +74,7 @@
   (when (positive? buflen)
     (define gb (text-gap (buffer-text buf)))
     (define tp (buffer-text-props buf))
-    (textprop-remove! tp 0 buflen)
+    (textprop-remove-key! tp 0 buflen 'face)
     (syntax-highlight-region! gb tp cfg 0 buflen)))
 
 ;; ============================================================

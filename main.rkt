@@ -66,6 +66,8 @@
          "lang/racket-lang.rkt"
          "lang/scheme-lang.rkt"
          "lang/python-lang.rkt"
+         "lang/bracket-cache.rkt"
+         "lang/font-lock.rkt"
          "input/key.rkt"
          "input/parse.rkt"
          "input/keymap.rkt")
@@ -106,7 +108,7 @@
 ;; Data stays with the buffer instead of in external lookup tables.
 ;; ============================================================
 
-(struct editor-buffer (buf syntax-config local-keymap) #:transparent)
+(struct editor-buffer (buf syntax-config bracket-cache local-keymap) #:transparent)
 
 ;; ============================================================
 ;; Mouse handlers — terminal (x,y) → buffer position pipeline
@@ -356,8 +358,15 @@
 
       ;; Match language → activate faces → scan → returns syntax-config
       ;; No external table: cfg lives in editor-buffer struct.
+      (bracket-register-faces!)
       (define cfg (syntax-setup! buf languages))
-      (define ebuf (editor-buffer buf cfg #f))
+      (define bkt-cache (make-bracket-cache))
+      (define ebuf (editor-buffer buf cfg bkt-cache #f))
+      ;; Initial bracket scan (after syntax faces are written)
+      (bracket-rescan-all! bkt-cache
+                           (text-gap (buffer-text buf))
+                           (buffer-text-props buf)
+                           (syntax-config-syntax-table cfg))
 
       (define frm (make-frame buf (terminal-width) (terminal-height)))
       (define leaf-caches (make-hasheq))
@@ -386,7 +395,13 @@
              (invalidate-leaf-caches! leaf-caches))
            (when (and acted? (dirty-dirty? db2))
              (define ext (dirty-extent db2))
-             (when ext (syntax-update! (editor-buffer-syntax-config ebuf) (editor-buffer-buf ebuf) ext))
+             (when ext
+               (syntax-update! (editor-buffer-syntax-config ebuf) (editor-buffer-buf ebuf) ext)
+               (bracket-update! (editor-buffer-bracket-cache ebuf)
+                                (text-gap (buffer-text (editor-buffer-buf ebuf)))
+                                (buffer-text-props (editor-buffer-buf ebuf))
+                                (syntax-config-syntax-table (editor-buffer-syntax-config ebuf))
+                                ext))
              (invalidate-leaf-caches! leaf-caches))
            (define new-cache
              (if (or acted? (not (eq? frm new-frm)))

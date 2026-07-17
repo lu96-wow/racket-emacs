@@ -22,6 +22,7 @@
  textprop-get
  textprop-face-at
  textprop-remove!
+ textprop-remove-key!
  textprop-adjust-insert!
  textprop-adjust-delete!)
 
@@ -66,6 +67,26 @@
 (define (textprop-remove! tp from to)
   (when (< from to)
     (interval-map-remove! (text-properties-map tp) from to)))
+
+(define (textprop-remove-key! tp from to key)
+  ;; Remove only `key` from properties in [from, to), preserving other
+  ;; keys on the same intervals.  Lets independent engines (font-lock,
+  ;; bracket coloring) own separate keys without clobbering each other.
+  (when (< from to)
+    (define im (text-properties-map tp))
+    ;; Collect first (no mutation during iteration), then rewrite.
+    (define hits
+      (for/list ([(ivl h) (in-dict im)]
+                 #:when (and (< (car ivl) to)
+                             (> (cdr ivl) from)
+                             (hash-has-key? h key)))
+        (list (max (car ivl) from) (min (cdr ivl) to) h)))
+    (for ([hit (in-list hits)])
+      (match-define (list s e h) hit)
+      (define h2 (hash-remove h key))
+      (interval-map-remove! im s e)
+      (unless (hash-empty? h2)
+        (interval-map-set! im s e h2)))))
 
 ;; ============================================================
 ;; Adjustment — explicit, called by buffer.rkt after each mutation

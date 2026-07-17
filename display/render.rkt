@@ -154,7 +154,10 @@
       (define ch (string-ref content char-idx))
 
       ;; Resolve face-id for this position
-      (define base-face (textprop-face-at text-props byte-pos))
+      ;; Priority: 'face (font-lock) → 'bracket-face (depth coloring)
+      (define base-face
+        (or (textprop-face-at text-props byte-pos)
+            (textprop-get text-props byte-pos 'bracket-face #f)))
       (define in-region? (and region-beg region-end
                               (>= byte-pos region-beg)
                               (<  byte-pos region-end)))
