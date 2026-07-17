@@ -60,6 +60,8 @@
          "kernel/data/query.rkt"
          "kernel/dirty.rkt"
          "kernel/base-edit.rkt"
+         "edit.rkt"
+         "kernel/data/syntax.rkt"
          "lang/apply.rkt"
          "lang/racket-lang.rkt"
          "lang/scheme-lang.rkt"
@@ -82,10 +84,18 @@
    ";;   window.rkt → rects → per-leaf viewport\n"
    "\n"
    ";; Keys:\n"
-   ";;   arrows  — move cursor\n"
-   ";;   C-v       — split window (same buffer)\n"
-   ";;   other   — insert character\n"
-   ";;   C-c     — quit\n"
+   ";;   C-f C-b C-n C-p     move cursor\n"
+   ";;   C-a C-e             beginning/end of line\n"
+   ";;   C-d                 forward-delete\n"
+   ";;   C-k                 kill line\n"
+   ";;   C-y                 yank (paste)\n"
+   ";;   C-_ C-r             undo / redo\n"
+   ";;   C-t C-l             forward/backward word\n"
+   ";;   C-w C-q             kill word forward/backward\n"
+   ";;   C-s C-j             forward/backward sexp\n"
+   ";;   C-v C-o             split / next window\n"
+   ";;   C-c                 quit\n"
+   ";;   mouse               click set point, wheel scroll\n"
    "\n"))
 
 ;; ============================================================
@@ -151,9 +161,15 @@
       (values db frm #t)))
 
 ;; ============================================================
-;; ============================================================
 ;; Global keymap — pure data, constructed once (analogous to lang-def)
 ;; ============================================================
+
+(define racket-st (make-standard-syntax-table))
+
+;; Helper: wrap a syntax-driven command (db st → db) for keymap dispatch.
+;; racket-st is pure compile-time data — static closure capture is fine.
+(define ((word-cmd fn) db frm)
+  (values (fn db racket-st) frm #t))
 
 (define global-keymap
   (make-keymap
@@ -182,6 +198,14 @@
    (cons (key-ctrl #\y) (edit-cmd cmd-yank))
    (cons (key-ctrl #\_) (edit-cmd cmd-undo))
    (cons (key-ctrl #\r) (edit-cmd cmd-redo))
+
+   ;; Word / sexp movement — syntax-table driven (M-f/M-b not in parse layer yet)
+   (cons (key-ctrl #\t) (word-cmd cmd-forward-word))    ;; C-t = forward-word
+   (cons (key-ctrl #\l) (word-cmd cmd-backward-word))   ;; C-l = backward-word
+   (cons (key-ctrl #\w) (word-cmd cmd-kill-word))       ;; C-w = kill-word
+   (cons (key-ctrl #\q) (word-cmd cmd-backward-kill-word))
+   (cons (key-ctrl #\s) (word-cmd cmd-forward-sexp))
+   (cons (key-ctrl #\j) (word-cmd cmd-backward-sexp))
 
    ;; Window
    (cons (key-ctrl #\v)

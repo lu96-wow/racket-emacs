@@ -46,25 +46,31 @@
 ;; ============================================================
 ;; Word scanning — Emacs-compatible forward-word / backward-word
 ;; ============================================================
-;; forward-word: skip word-chars → skip whitespace → stop at next non-ws
-;; backward-word: skip whitespace backward → skip word-chars backward
+;; forward-word: skip word-chars → skip punctuation → skip whitespace → stop
+;; backward-word: skip whitespace backward → skip punctuation → skip word-chars backward
 
 (define (scan-word-forward gb pos len st #:skip-ws? [skip-ws? #t])
   (define word? (λ (ch) (char-word? ch st)))
-  (define after-word (skip-while-forward gb pos len word?))
+  (define punct? (λ (ch) (and (not (char-word? ch st))
+                              (not (char-whitespace? ch st)))))
+  (define after-word  (skip-while-forward gb pos len word?))
+  (define after-punct (skip-while-forward gb after-word len punct?))
   (if skip-ws?
-      (skip-while-forward gb after-word len
+      (skip-while-forward gb after-punct len
         (λ (ch) (char-whitespace? ch st)))
-      after-word))
+      after-punct))
 
 (define (scan-word-backward gb pos st #:skip-ws? [skip-ws? #t])
   (define ws? (λ (ch) (char-whitespace? ch st)))
   (define word? (λ (ch) (char-word? ch st)))
+  (define punct? (λ (ch) (and (not (char-word? ch st))
+                              (not (char-whitespace? ch st)))))
   (define before-ws
     (if skip-ws?
         (skip-while-backward gb pos ws?)
         pos))
-  (skip-while-backward gb before-ws word?))
+  (define before-punct (skip-while-backward gb before-ws punct?))
+  (skip-while-backward gb before-punct word?))
 
 ;; ============================================================
 ;; Symbol scanning — like word but also includes symbol-constituent
