@@ -75,24 +75,28 @@
   (logical-index gb adjusted))
 
 (define (gap-prev-char-pos gb pos)
-  (define bs (gap-buffer-bytes gb))
-  (define gs (gap-buffer-gap-start gb))
-  (define ge (gap-buffer-gap-end gb))
-  (define phys (physical-index gb pos))
-  ;; Walk backward over continuation bytes. If we cross into the gap
-  ;; from the right side, jump to before the gap and continue.
-  (define prev-phys
-    (let loop ([p (sub1 phys)])
-      (cond [(< p 0) 0]
-            ;; Just crossed gap boundary from right → jump to before gap
-            [(and (> ge gs) (= p (sub1 ge)))
-             (loop (sub1 gs))]
-            ;; Landed inside gap → jump to before gap
-            [(and (> ge gs) (>= p gs) (< p ge))
-             (loop (sub1 gs))]
-            [(utf8-start-byte? (bytes-ref bs p)) p]
-            [else (loop (sub1 p))])))
-  (logical-index gb prev-phys))
+  ;; If at position 0, there's nothing before — return 0 immediately.
+  ;; This avoids the physical-to-logical round-trip that breaks when
+  ;; the gap starts at position 0 (logical-index of physical 0 returns -245).
+  (if (zero? pos) 0
+      (let* ([bs  (gap-buffer-bytes gb)]
+             [gs  (gap-buffer-gap-start gb)]
+             [ge  (gap-buffer-gap-end gb)]
+             [phys (physical-index gb pos)]
+             ;; Walk backward over continuation bytes. If we cross into the gap
+             ;; from the right side, jump to before the gap and continue.
+             [prev-phys
+              (let loop ([p (sub1 phys)])
+                (cond [(< p 0) 0]
+                      ;; Just crossed gap boundary from right → jump to before gap
+                      [(and (> ge gs) (= p (sub1 ge)))
+                       (loop (sub1 gs))]
+                      ;; Landed inside gap → jump to before gap
+                      [(and (> ge gs) (>= p gs) (< p ge))
+                       (loop (sub1 gs))]
+                      [(utf8-start-byte? (bytes-ref bs p)) p]
+                      [else (loop (sub1 p))]))])
+        (logical-index gb prev-phys))))
 
 (define (gap-skip-n gb pos n)
   (let loop ([p pos] [i n])
@@ -184,8 +188,12 @@
       (+ logical-pos (- (gap-buffer-gap-end gb) (gap-buffer-gap-start gb)))))
 
 (define (logical-index gb physical-pos)
+  ;; Convert physical byte position → logical position.
+  ;; Physical positions inside the gap are clamped to gap-start:
+  ;; they don't correspond to any logical byte.
   (define gs (gap-buffer-gap-start gb))
   (define ge (gap-buffer-gap-end gb))
-  (if (< physical-pos gs)
-      physical-pos
-      (- physical-pos (- ge gs))))
+  (cond
+    [(< physical-pos gs)   physical-pos]
+    [(>= physical-pos ge)  (- physical-pos (- ge gs))]
+    [else                  gs]))
