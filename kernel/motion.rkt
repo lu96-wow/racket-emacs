@@ -7,6 +7,7 @@
 ;; Independently testable without wiring up the full editor.
 
 (require "data/query.rkt"
+         "data/gap.rkt"
          "data/syntax.rkt")
 
 (provide
@@ -46,8 +47,8 @@
 ;; ============================================================
 ;; Word scanning — Emacs-compatible forward-word / backward-word
 ;; ============================================================
-;; forward-word:  on word → end of this word | not on word → skip → end of next word
-;; backward-word: on word → start of this word | not on word → skip → start of prev word
+;; forward-word:  on word → end   | not on word → skip → end of next word
+;; backward-word: on word → skip back to prev word end | not on word → skip → prev word end
 
 (define (scan-word-forward gb pos len st)
   (define word? (λ (ch) (char-word? ch st)))
@@ -59,14 +60,24 @@
         after-word)))
 
 (define (scan-word-backward gb pos st)
+  ;; Symmetric with forward: always land at a word's end.
+  ;; Step 1: skip backward past the word right before cursor (if any)
+  ;; Step 2: skip backward past non-word chars
+  ;; Step 3: skip backward to start of previous word
+  ;; Step 4: skip forward to end of that word
   (define word? (λ (ch) (char-word? ch st)))
   (define non-word? (λ (ch) (not (char-word? ch st))))
-  (define ch (and (> pos 0) (gap-char gb (gap-prev-char-pos gb pos))))
-  (if (and ch (char-word? ch st))
-      (skip-while-backward gb pos word?)
-      (let* ([after-non  (skip-while-backward gb pos non-word?)]
-             [after-word (skip-while-backward gb after-non word?)])
-        after-word)))
+  (define len (gap-length gb))
+  (define after-word1 (skip-while-backward gb pos word?))
+  (define after-non   (skip-while-backward gb after-word1 non-word?))
+  (if (= after-non 0)
+      0
+      (let* ([prev-start (skip-while-backward gb after-non word?)]
+             [prev-end   (if (and (< prev-start len)
+                                  (char-word? (gap-char gb prev-start) st))
+                             (skip-while-forward gb prev-start len word?)
+                             prev-start)])
+        prev-end)))
 
 ;; ============================================================
 ;; Symbol scanning — like word but also includes symbol-constituent
