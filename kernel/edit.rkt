@@ -38,6 +38,7 @@
  ;; movement (point only)
  cmd-forward-char cmd-backward-char
  cmd-beginning-of-line cmd-end-of-line
+ cmd-next-line cmd-prev-line
 
  ;; mark / region
  cmd-set-mark cmd-swap-point-and-mark
@@ -203,6 +204,28 @@
                           [else (loop (gap-next-char-pos gb p))]))])
         (dirty-set-point! db eol))))
 
+(define (cmd-next-line db evt)
+  ;; Move point to the beginning of the next line.
+  (define buf (dirty-buffer-buf db))
+  (define gb  (text-gap (buffer-text buf)))
+  (define pt  (dirty-point db))
+  (define len (dirty-length db))
+  (define nl  (gap-scan-byte gb pt 'forward (lambda (b) (= b #x0A))))
+  (dirty-set-point! db (if (>= nl len) len (add1 nl))))
+
+(define (cmd-prev-line db evt)
+  ;; Move point to the beginning of the previous line.
+  (define buf (dirty-buffer-buf db))
+  (define gb  (text-gap (buffer-text buf)))
+  (define pt  (dirty-point db))
+  (if (zero? pt)
+      db
+      (let ([nl (gap-scan-byte gb (sub1 pt)
+                    'backward (lambda (b) (= b #x0A)))])
+        (if (< nl 0)
+            (dirty-set-point! db 0)
+            (dirty-set-point! db (add1 nl))))))
+
 ;; ============================================================
 ;; Mark / Region
 ;; ============================================================
@@ -302,6 +325,26 @@
            [db1 (dirty-set-point! db0 7)]
            [db2 (cmd-end-of-line db1 (make-ev #\e))])
       (check-equal? (dirty-point db2) 11)))
+
+  (test-case "next-line"
+    (let* ([db0 (make-dirty-buffer (make-buffer "test" "line1\nline2\nline3"))]
+           [db1 (cmd-next-line db0 (make-ev #\n))])
+      (check-equal? (dirty-point db1) 6))
+    ;; at end of buffer: stays at end
+    (let* ([db0 (make-dirty-buffer (make-buffer "test" "a\n"))]
+           [db1 (dirty-set-point! db0 2)]
+           [db2 (cmd-next-line db1 (make-ev #\n))])
+      (check-equal? (dirty-point db2) 2)))
+
+  (test-case "prev-line"
+    (let* ([db0 (make-dirty-buffer (make-buffer "test" "line1\nline2\nline3"))]
+           [db1 (dirty-set-point! db0 10)]  ;; in line3
+           [db2 (cmd-prev-line db1 (make-ev #\p))])
+      (check-equal? (dirty-point db2) 6))  ;; beginning of line2
+    ;; at beginning: stays
+    (let* ([db0 (make-dirty-buffer (make-buffer "test" "a\nb"))]
+           [db1 (cmd-prev-line db0 (make-ev #\p))])
+      (check-equal? (dirty-point db1) 0)))
 
   (test-case "set-mark and swap"
     (let* ([db0 (make-dirty-buffer (make-buffer "test" "hello world"))]
