@@ -88,6 +88,16 @@
    "\n"))
 
 ;; ============================================================
+;; editor-buffer — extends kernel buffer with editor-layer data
+;;
+;; Wraps a kernel buffer with syntax config and optional local keymap.
+;; kernel/ never sees this — it only knows about plain buffer?.
+;; Data stays with the buffer instead of in external lookup tables.
+;; ============================================================
+
+(struct editor-buffer (buf syntax-config local-keymap) #:transparent)
+
+;; ============================================================
 ;; ============================================================
 ;; Global keymap — pure data, constructed once (analogous to lang-def)
 ;; ============================================================
@@ -244,13 +254,12 @@
       (define db  (make-dirty-buffer buf))
       (init-face-cache!)
       (define fc  (current-face-cache))
-
-      ;; Language list + per-buffer config table (caller owns both)
-      (define lang-table (make-hasheq))
       (define languages (list racket-lang-def scheme-lang-def python-lang-def))
 
-      ;; Match language → activate faces → scan entire buffer
-      (syntax-setup! lang-table buf languages)
+      ;; Match language → activate faces → scan → returns syntax-config
+      ;; No external table: cfg lives in editor-buffer struct.
+      (define cfg (syntax-setup! buf languages))
+      (define ebuf (editor-buffer buf cfg #f))
 
       (define frm (make-frame buf (terminal-width) (terminal-height)))
       (define leaf-caches (make-hasheq))
@@ -263,21 +272,23 @@
           (render-and-flush db frm #f fc leaf-caches)))
 
       ;; --- Event loop ---
-      (let loop ([db db] [frm frm] [cache cache] [leaf-caches leaf-caches])
+      (let loop ([db db] [frm frm] [cache cache] [leaf-caches leaf-caches] [ebuf ebuf])
         (define ke (read-key))
         (cond
-          [(key-idle? ke)  (loop db frm cache leaf-caches)]
+          [(key-idle? ke)  (loop db frm cache leaf-caches ebuf)]
           [(key-quit? ke)  (void)]
           [else
+           ;; Resolve keymap: local (from ebuf) or fallback to global
+           (define km (keymap-resolve (editor-buffer-local-keymap ebuf) global-keymap))
            (define-values (new-db new-frm acted?)
-             (dispatch-key global-keymap db frm ke cmd-self-insert))
+             (dispatch-key km db frm ke cmd-self-insert))
            (define db2 (if acted? (dirty-commit! new-db) new-db))
            (when (and acted? (not (eq? frm new-frm)))
              (layout-frame! new-frm)
              (invalidate-leaf-caches! leaf-caches))
            (when (and acted? (dirty-dirty? db2))
              (define ext (dirty-extent db2))
-             (when ext (syntax-update! lang-table buf ext))
+             (when ext (syntax-update! (editor-buffer-syntax-config ebuf) (editor-buffer-buf ebuf) ext))
              (invalidate-leaf-caches! leaf-caches))
            (define new-cache
              (if (or acted? (not (eq? frm new-frm)))
@@ -286,7 +297,7 @@
                                  cache)])
                    (render-and-flush db2 new-frm cache fc leaf-caches))
                  cache))
-           (loop db2 new-frm new-cache leaf-caches)])))
+           (loop db2 new-frm new-cache leaf-caches ebuf)])))
 
     ;; Cleanup on exit (normal or exception)
     (λ ()

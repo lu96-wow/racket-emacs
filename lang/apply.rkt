@@ -2,14 +2,14 @@
 
 ;; lang/apply.rkt — Syntax highlighting application layer
 ;;
-;; Zero module-level state.  The caller owns the config table and
-;; language list, passing them as explicit arguments — same pattern
-;; as input/keymap.rkt's keymap-resolve.
+;; Zero module-level state.  Functions take syntax-config explicitly
+;; — no table, no indirect lookup.  Caller stores config however it
+;; wants (struct field, hash, parameter, ...).
 ;;
-;;   (syntax-setup!    table buf languages) — match → activate → store → scan
-;;   (syntax-update!   table buf extent)    — incremental scan after edit
-;;   (syntax-highlight-buffer! table buf)   — full re-scan
-;;   (syntax-config-get table buf)          — read per-buffer config
+;;   (syntax-setup! buf languages)         → syntax-config
+;;   (syntax-highlight-buffer! cfg buf)     → void
+;;   (syntax-update! cfg buf extent)        → void
+;;   (match-language buf languages)         → lang-def | #f
 ;;
 ;; Dependencies: kernel/buffer, lang/font-lock, lang/define, display/face
 
@@ -23,26 +23,12 @@
          "racket-lang.rkt")  ; for default-language
 
 (provide
- ;; operations (table + languages passed explicitly by caller)
- syntax-config-get
- syntax-config-set!
- syntax-setup!
- syntax-update!
- syntax-highlight-buffer!
+ syntax-setup!              ;; buf languages → syntax-config
+ syntax-highlight-buffer!    ;; cfg buf → void
+ syntax-update!              ;; cfg buf extent → void
 
  ;; pure matching
- match-language)
-
-;; ============================================================
-;; Per-buffer config access — caller owns the table
-;; ============================================================
-
-(define (syntax-config-get table buf)
-  ;; table : (hash/c buffer? syntax-config?) — caller-owned
-  (hash-ref table buf (λ () #f)))
-
-(define (syntax-config-set! table buf cfg)
-  (hash-set! table buf cfg))
+ match-language)             ;; buf languages → lang-def | #f
 
 ;; ============================================================
 ;; Matching — filename → lang-def (pure)
@@ -50,7 +36,7 @@
 
 (define (match-language buf languages)
   ;; buf       : buffer?
-  ;; languages : (listof lang-def?) — caller-owned, no box needed
+  ;; languages : (listof lang-def?)
   (define fname (buffer-filename buf))
   (and fname
        (for/or ([ld (in-list languages)])
@@ -60,29 +46,27 @@
 (define (default-language) racket-lang-def)
 
 ;; ============================================================
-;; fontify-setup! — match → activate → store → fontify
+;; syntax-setup! — match → activate → build → scan
 ;; ============================================================
 
-(define (syntax-setup! table buf languages)
-  ;; table     : (hash/c buffer? syntax-config?) — caller-owned
+(define (syntax-setup! buf languages)
   ;; buf       : buffer?
   ;; languages : (listof lang-def?)
-  ;; 1. Match language by filename
+  ;; → syntax-config? — caller stores it (e.g. in editor-buffer struct)
+  ;; Side effects: registers faces in global cache, writes text-props on buf.
   (define ld (or (match-language buf languages) (default-language)))
-  ;; 2. Register faces in global face-cache
   (activate-language! ld)
-  ;; 3. Build syntax config and store on buffer
   (define cfg (lang-def->syntax-config ld))
-  (syntax-config-set! table buf cfg)
-  ;; 4. Scan entire buffer
-  (syntax-highlight-buffer! table buf))
+  (syntax-highlight-buffer! cfg buf)
+  cfg)
 
 ;; ============================================================
 ;; syntax-highlight-buffer! — full scan
 ;; ============================================================
 
-(define (syntax-highlight-buffer! table buf)
-  (define cfg (syntax-config-get table buf))
+(define (syntax-highlight-buffer! cfg buf)
+  ;; cfg : syntax-config? — provided by caller (from editor-buffer field)
+  ;; buf : buffer?
   (unless cfg
     (error 'syntax-highlight-buffer! "no syntax config for buffer ~a"
            (buffer-name buf)))
@@ -97,8 +81,10 @@
 ;; syntax-update! — incremental scan after edit
 ;; ============================================================
 
-(define (syntax-update! table buf extent)
-  (define cfg (syntax-config-get table buf))
+(define (syntax-update! cfg buf extent)
+  ;; cfg    : syntax-config? | #f — #f means no config, skip
+  ;; buf    : buffer?
+  ;; extent : (cons/c exact-nonnegative-integer? exact-nonnegative-integer?)
   (unless cfg (void))
   (define gb (text-gap (buffer-text buf)))
   (define tp (buffer-text-props buf))
@@ -114,22 +100,20 @@
   (init-face-cache!)
 
   (test-case "syntax-setup! on scratch buffer"
-    (define table (make-hasheq))
     (define languages (list racket-lang-def))
     (define buf (make-buffer "*scratch*" ";; comment\n(define x 1)\n"))
-    (syntax-setup! table buf languages)
-    (check-pred syntax-config? (syntax-config-get table buf) "should have config")
+    (define cfg (syntax-setup! buf languages))
+    (check-pred syntax-config? cfg)
     (check-equal? (buffer-face-at buf 0) 'font-lock-comment-face)
     (check-equal? (buffer-face-at buf 13) 'font-lock-keyword-face))
 
   (test-case "syntax-update! after edit"
-    (define table (make-hasheq))
     (define languages (list racket-lang-def))
     (define buf (make-buffer "*test*" "(define a 1)\n(define b 2)\n"))
-    (syntax-setup! table buf languages)
+    (define cfg (syntax-setup! buf languages))
     (buffer-insert! buf "xxx" 5)
     (define ext (cons 5 8))
-    (syntax-update! table buf ext)
+    (syntax-update! cfg buf ext)
     (check-equal? (buffer-face-at buf 2) 'font-lock-keyword-face))
 
   (test-case "match-language — .rkt file"

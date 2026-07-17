@@ -307,7 +307,7 @@
       (syntax-highlight-region! gb tp cfg 0 (gap-length gb))
       (check-equal? (textprop-get tp 2 'face) 'font-lock-keyword-face)
       ;; Comment face on later byte (after ;;)
-      (check-true (textprop-get tp 14 'face #f))))
+      (check-pred symbol? (textprop-get tp 14 'face #f))))
 
   (test-case "incremental: syntax-highlight-changed! extends region"
     (let* ([gb (make-gb "line1\nline2 ;; comment\nline3")]

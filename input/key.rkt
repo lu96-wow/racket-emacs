@@ -55,7 +55,7 @@
   (and (key-sym? ke) (eq? (key-sym-name ke) 'idle)))
 
 (define (key-quit? ke)
-  (or (and (key-ctrl? ke) (memv (key-ctrl-ch ke) '(#\c #\d #\g)))
+  (or (and (key-ctrl? ke) (memv (key-ctrl-ch ke) '(#\c #\d #\g)) #t)
       (and (key-sym? ke) (eq? (key-sym-name ke) 'cancel))))
 
 ;; ============================================================

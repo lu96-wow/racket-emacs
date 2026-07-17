@@ -23,7 +23,7 @@
 
  ;; keymap composition (pure)
  keymap-merge        ;; base local → merged
- keymap-resolve      ;; table buf fallback → effective keymap
+ keymap-resolve      ;; local fallback → effective keymap
 
  ;; dispatch
  dispatch-key
@@ -68,14 +68,11 @@
 ;; keymap-resolve — pure lookup in caller-owned table
 ;; ============================================================
 
-(define (keymap-resolve table buf fallback)
-  ;; table    : (hash/c buffer? keymap?) — caller-owned; caller decides
-  ;;             whether mutable or immutable, where it lives, when to mutate.
-  ;; buf      : buffer?
-  ;; fallback : keymap — default when buf has no local keymap
+(define (keymap-resolve local fallback)
+  ;; local    : keymap | #f — caller gets it from wherever (struct field, etc.)
+  ;; fallback : keymap — default when local is #f
   ;; → keymap — (merge fallback local) if local exists, else fallback
-  ;; Pure — reads table, returns new keymap, no side effects.
-  (define local (hash-ref table buf (λ () #f)))
+  ;; Pure — no table, no indirection.
   (if local (keymap-merge fallback local) fallback))
 
 ;; ============================================================
@@ -193,20 +190,16 @@
     ;; key not in either
     (check-false (keymap-lookup merged (key-char #\z))))
 
-  (test-case "keymap-resolve: caller-owned table"
+  (test-case "keymap-resolve"
     (define global (make-keymap
                     (cons (key-char #\a) (edit-cmd cmd-forward-char))))
     (define local  (make-keymap
                     (cons (key-char #\x) (edit-cmd cmd-backward-delete))))
-    (define buf  (make-buffer "*test*" ""))
-    ;; Caller creates and owns the table
-    (define table (make-hasheq))
-    ;; No entry → fallback is used as-is
-    (define km1 (keymap-resolve table buf global))
+    ;; No local → fallback as-is
+    (define km1 (keymap-resolve #f global))
     (check-true (procedure? (keymap-lookup km1 (key-char #\a))))
     (check-false (keymap-lookup km1 (key-char #\x)))
-    ;; Caller writes to the table
-    (hash-set! table buf local)
-    (define km2 (keymap-resolve table buf global))
+    ;; Local keymap → merged
+    (define km2 (keymap-resolve local global))
     (check-true (procedure? (keymap-lookup km2 (key-char #\a))))  ; global
-    (check-true (procedure? (keymap-lookup km2 (key-char #\x))))))
+    (check-true (procedure? (keymap-lookup km2 (key-char #\x)))))) ; local)
