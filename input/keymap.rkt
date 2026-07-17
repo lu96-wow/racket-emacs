@@ -31,6 +31,7 @@
  ;; command helpers
  edit-cmd       ;; (db→db fn) → (db frm → db frm)
  window-cmd     ;; (frm→frm fn) → (db frm → db frm)
+ mouse-cmd      ;; (db frm ke → db frm) — receives key-mouse struct
  quit-cmd
  nop-cmd)
 
@@ -92,6 +93,13 @@
   ;; fn : frm → frm
   (λ (db frm) (values db (fn frm) #t)))
 
+(define (mouse-cmd fn)
+  ;; fn : db × frm × key-mouse → (values db frm acted?)
+  ;; The function receives the full mouse event struct including
+  ;; terminal (x,y) coordinates.  It is responsible for converting
+  ;; to buffer positions via frame/window primitives.
+  (λ (db frm ke) (fn db frm ke)))
+
 (define quit-cmd
   ;; Returns 'quit as acted? value
   (λ (db frm) (values db frm 'quit)))
@@ -107,9 +115,17 @@
   ;; km   : keymap (hash)
   ;; db   : dirty-buffer
   ;; frm  : frame
-  ;; ke   : key-char | key-ctrl | key-sym
+  ;; ke   : key-char | key-ctrl | key-sym | key-mouse
   ;; self-insert-fn : db char → db  (from kernel/edit.rkt)
   (cond
+    ;; Mouse events: match by (button . action) pair, not full struct.
+    ;; Mouse coordinates are variable — button+action is the stable identity.
+    ;; The handler receives the original key-mouse struct with x,y.
+    [(key-mouse? ke)
+     (define mouse-key (cons (key-mouse-button ke) (key-mouse-action ke)))
+     (cond
+       [(keymap-lookup km mouse-key) => (λ (cmd) (cmd db frm ke))]
+       [else (values db frm #f)])]
     [(keymap-lookup km ke) => (λ (cmd) (cmd db frm))]
     [(key-self-insert? ke)
      (values (self-insert-fn db (key-char-ch ke)) frm #t)]
@@ -161,6 +177,43 @@
     (define db  (make-dirty-buffer buf))
     (define-values (db2 _frm acted?)
       (dispatch-key km db #f (key-sym 'f12) cmd-self-insert))
+    (check-false acted?))
+
+  (test-case "dispatch: mouse event"
+    (define hit? (box #f))
+    (define km (make-keymap
+                (cons (cons 'left 'press)
+                      (mouse-cmd (λ (db frm ke)
+                                   (set-box! hit? #t)
+                                   (values db frm #t))))))
+    (define buf (make-buffer "*t*" "hello"))
+    (define db  (make-dirty-buffer buf))
+    ;; Mouse events have variable coordinates; dispatch matches by button+action
+    (define-values (db2 _frm acted?)
+      (dispatch-key km db #f (key-mouse 'left 42 10 'press 0) cmd-self-insert))
+    (check-true (unbox hit?))
+    (check-true acted?))
+
+  (test-case "dispatch: mouse event with different coordinates still matches"
+    (define hit? (box #f))
+    (define km (make-keymap
+                (cons (cons 'left 'press)
+                      (mouse-cmd (λ (db frm ke)
+                                   (set-box! hit? #t)
+                                   (values db frm #t))))))
+    (define buf (make-buffer "*t*" "hello"))
+    (define db  (make-dirty-buffer buf))
+    ;; Different x,y than previous test — still matches by button+action
+    (define-values (db2 _frm acted?)
+      (dispatch-key km db #f (key-mouse 'left 99 99 'press 8) cmd-self-insert))
+    (check-true (unbox hit?)))
+
+  (test-case "dispatch: unknown mouse ignored"
+    (define km (make-keymap))
+    (define buf (make-buffer "*t*" ""))
+    (define db  (make-dirty-buffer buf))
+    (define-values (db2 _frm acted?)
+      (dispatch-key km db #f (key-mouse 'right 1 1 'press 0) cmd-self-insert))
     (check-false acted?))
 
   (test-case "command helpers"

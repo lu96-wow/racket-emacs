@@ -22,7 +22,8 @@
 
 (require "../kernel/buffer.rkt"
          "../kernel/data/text.rkt"
-         "../kernel/data/marker.rkt")
+         "../kernel/data/marker.rkt"
+         "layout.rkt")
 
 (provide
  ;; ── types ──
@@ -47,6 +48,10 @@
  ;; ── pure calc (customisable) ──
  layout-calc
  focus-list next-leaf prev-leaf leaf-geometry leaf-at-xy leaf-count
+
+ ;; ── screen → buffer: terminal (x,y) → (leaf, buffer-pos) ──
+ frame-xy->leaf      ;; frame × x × y → (or/c leaf? #f)  (x,y: 1-based SGR)
+ leaf-xy->buffer-pos ;; leaf × x × y × rect → (or/c byte-pos? #f)  (x,y: 0-based local)
 
  ;; ── scroll (pure result → apply to leaf markers) ──
  apply-scroll!
@@ -218,7 +223,7 @@
   (hash-ref (frame-rects frm) lf (λ () #f)))
 
 ;; ============================================================
-;; Pure: leaf-at-xy — frame × x × y → (or leaf? #f)
+;; Pure: leaf-at-xy — frame × x × y (0-based) → (or leaf? #f)
 ;; ============================================================
 
 (define (leaf-at-xy frm x y)
@@ -226,6 +231,50 @@
     (and (>= y (rect-top r))  (< y (+ (rect-top r) (rect-rows r)))
          (>= x (rect-left r)) (< x (+ (rect-left r) (rect-cols r)))
          lf)))
+
+;; ============================================================
+;; frame-xy->leaf — terminal (x,y) ± 1-based SGR → leaf
+;; ============================================================
+;; SGR mouse sends 1-based coordinates: col 1 = first column, row 1 = first row.
+;; All internal systems (rect, layout, vbuffer) use 0-based coordinates.
+;; This function is the single conversion point.
+
+(define (frame-xy->leaf frm x y)
+  ;; x, y : exact-positive-integer? — 1-based (from SGR mouse)
+  ;; → (or/c leaf? #f)
+  (leaf-at-xy frm (sub1 x) (sub1 y)))
+
+;; ============================================================
+;; leaf-xy->buffer-pos — leaf-local (x,y) ± 0-based → buffer byte-pos
+;; ============================================================
+;; Given a leaf and local coordinates (relative to leaf rect origin),
+;; compute the buffer byte position.  Returns (or/c byte-pos? #f).
+;; This is the pure reverse of compute-layout + render.
+
+(define (leaf-xy->buffer-pos lf geo local-x local-y)
+  ;; lf      : leaf? — the target leaf
+  ;; geo     : rect? — leaf's screen geometry (from frame-rects)
+  ;; local-x : exact-nonnegative-integer? — column within leaf (0-based)
+  ;; local-y : exact-nonnegative-integer? — row within leaf (0-based)
+  ;; → (or/c byte-pos? #f)
+  (define buf (leaf-buffer lf))
+  (define gb  (text-gap (buffer-text buf)))
+  (define pt  (marker-pos (leaf-point lf)))
+  (define ws  (marker-pos (leaf-start lf)))
+  (define rows (rect-rows geo))
+  (define cols (rect-cols geo))
+  (define hs  (leaf-hscroll lf))
+
+  ;; Recompute layout from leaf state + rect geometry.
+  ;; This is pure — same parameters as used in render-frame.
+  (define ly (compute-layout gb pt
+               #:start-pos ws
+               #:max-rows  rows
+               #:max-cols  cols
+               #:wrap-mode 'none
+               #:left-col  hs))
+
+  (layout-query-pos gb ly local-y local-x))
 
 ;; ============================================================
 ;; Mutations: tree structure
@@ -572,6 +621,57 @@
     (check-equal? (marker-pos (leaf-start lf)) 0)
     (check-equal? (marker-pos (leaf-point lf)) 0)
     (check-equal? (leaf-hscroll lf) 0))
+
+  (test-case "frame-xy->leaf: SGR 1-based → 0-based conversion"
+    (define frm (make-frame (test-buf) 80 24))
+    (define lf (frame-selected frm))
+    ;; SGR mouse sends (1,1) for top-left corner
+    (check-eq? (frame-xy->leaf frm 1 1) lf)
+    ;; (80, 24) = bottom-right corner
+    (check-eq? (frame-xy->leaf frm 80 24) lf)
+    ;; Outside bounds → #f
+    (check-false (frame-xy->leaf frm 81 25)))
+
+  (test-case "frame-xy->leaf: horizontal split boundary"
+    (define a (test-buf "aaa"))
+    (define frm (make-frame a 80 24))
+    (frame-split-leaf! frm 'horizontal)
+    (define geo (hash->list (frame-rects frm)))
+    ;; Two leaves partitioning 80 columns 0-based
+    ;; leaf 0: left=0, cols=40; leaf 1: left=40, cols=40
+    ;; SGR x=40 → 0-based 39 → should be leaf 0 (last col of first leaf)
+    (check-eq? (frame-xy->leaf frm 40 1)
+               (car (sort (focus-list (frame-tree frm))
+                           (λ (a b) (< (rect-left (leaf-geometry frm a))
+                                       (rect-left (leaf-geometry frm b)))))))
+    ;; SGR x=41 → 0-based 40 → should be leaf 1 (first col of second leaf)
+    (check-eq? (frame-xy->leaf frm 41 1)
+               (cadr (sort (focus-list (frame-tree frm))
+                            (λ (a b) (< (rect-left (leaf-geometry frm a))
+                                        (rect-left (leaf-geometry frm b))))))))
+
+  (test-case "leaf-xy->buffer-pos maps screen cell to buffer byte"
+    (define buf (test-buf "hello world\nline two"))
+    (define frm (make-frame buf 80 24))
+    (define lf (frame-selected frm))
+    (define geo (leaf-geometry frm lf))
+    ;; Click at leaf-local (0,0) → first byte of buffer
+    (check-equal? (leaf-xy->buffer-pos lf geo 0 0) 0)
+    ;; Click at (6, 0) → 'w' at byte 6
+    (check-equal? (leaf-xy->buffer-pos lf geo 6 0) 6)
+    ;; Click below content → buffer end
+    (check-equal? (leaf-xy->buffer-pos lf geo 0 10) 19))
+
+  (test-case "leaf-xy->buffer-pos with hscroll"
+    (define buf (test-buf "abcdefghijklmnopqrstuvwxyz"))
+    (define frm (make-frame buf 10 5))  ;; 10 cols
+    (define lf (frame-selected frm))
+    (apply-scroll! lf 0 5)  ;; hscroll=5, so column 0 shows 'f'
+    (define geo (leaf-geometry frm lf))
+    ;; local (0,0) with hscroll=5 → 'f' at byte 5
+    (check-equal? (leaf-xy->buffer-pos lf geo 0 0) 5)
+    ;; local (1,0) → 'g' at byte 6
+    (check-equal? (leaf-xy->buffer-pos lf geo 1 0) 6))
 
   (test-case "focus switch preserves each leaf's buffer position"
     (define buf (test-buf "line one\nline two\nline three\n"))

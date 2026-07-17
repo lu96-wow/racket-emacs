@@ -164,14 +164,28 @@
 ;; For mouse/input: user clicked at screen position → which buffer byte?
 
 (define (layout-query-pos gb ly row col)
+  ;; Screen (row, col) — 0-based, relative to layout — → buffer byte-pos.
+  ;; Returns the byte position of the character at that screen cell.
+  ;; Clicks past end-of-buffer return buffer-end (below the last line)
+  ;; or end-of-line (beyond the last column).
   (define lines (layout-lines ly))
-  (and (>= row 0) (< row (length lines))
-       (let* ([vl          (list-ref lines row)]
-              [buf-pos     (visual-line-buf-pos vl)]
-              [left-col    (layout-left-col ly)]
-              [target-col  (+ left-col col)]
-              [end-buf-pos (visual-line-end-buf-pos vl)])
-         (scan-display-width gb buf-pos end-buf-pos target-col))))
+  (define buf-len (gap-length gb))
+  (cond
+    ;; Below all content → buffer end
+    [(>= row (length lines))
+     (if (null? lines)
+         (layout-start-pos ly)
+         (visual-line-end-buf-pos (last lines)))]
+    [else
+     (let* ([vl          (list-ref lines row)]
+            [buf-pos     (visual-line-buf-pos vl)]
+            [left-col    (layout-left-col ly)]
+            [target-col  (+ left-col col)]
+            [end-buf-pos (visual-line-end-buf-pos vl)])
+       (if (>= target-col (gap-display-width gb buf-pos end-buf-pos))
+           ;; Past end of this visual line → clamp to line end
+           end-buf-pos
+           (scan-display-width gb buf-pos end-buf-pos target-col)))]))
 
 ;; ============================================================
 ;; pos->row-col — buffer byte-pos → screen (row, col)
@@ -238,7 +252,14 @@
                 [else #f]))
         #f))  ; no hscroll in wrap mode
 
-  (values (or new-start start-pos) (or new-hscroll hscroll)))
+  (values (or new-start start-pos)
+          (cond [new-start
+                 ;; Vertical scroll happened — reset hscroll.
+                 ;; Prevents long-line hscroll from leaking into
+                 ;; shorter lines above/below.
+                 (if (> hscroll 0) 0 hscroll)]
+                [new-hscroll new-hscroll]
+                [else hscroll])))
 
 ;; ============================================================
 ;; Scroll helpers (internal)
@@ -316,7 +337,17 @@
       ;; Click row 0, col 6 → should point at 'w' → byte 6
       (check-equal? (layout-query-pos gb ly 0 6) 6)
       ;; Click row 1 → empty trailing line → byte 12 (end of buffer)
-      (check-equal? (layout-query-pos gb ly 1 0) 12)))
+      (check-equal? (layout-query-pos gb ly 1 0) 12))
+    ;; Click past end of content → buffer end
+    (let* ([gb (make-gb "abc")]
+           [ly (compute-layout gb 0 #:max-rows 5 #:max-cols 20)])
+      ;; Only 1 line of content, click row 3 → buffer end
+      (check-equal? (layout-query-pos gb ly 3 0) 3))
+    ;; Click past end of line → clamped to line end
+    (let* ([gb (make-gb "ab\n")]
+           [ly (compute-layout gb 0 #:max-rows 5 #:max-cols 5)])
+      ;; Row 0, col 4 (past "ab") → byte 2 (end of first line)
+      (check-equal? (layout-query-pos gb ly 0 4) 2)))
 
   (test-case "pos->row-col"
     (let* ([gb (make-gb "ab\ncd\n")]

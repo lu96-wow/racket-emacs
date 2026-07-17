@@ -57,6 +57,7 @@
          "kernel/data/text.rkt"
          "kernel/data/marker.rkt"
          "kernel/data/gap.rkt"
+         "kernel/data/query.rkt"
          "kernel/dirty.rkt"
          "kernel/edit.rkt"
          "lang/apply.rkt"
@@ -96,6 +97,69 @@
 ;; ============================================================
 
 (struct editor-buffer (buf syntax-config local-keymap) #:transparent)
+
+;; ============================================================
+;; Mouse handlers — terminal (x,y) → buffer position pipeline
+;; ============================================================
+;; Architecture (inverse of render-frame's forward pipeline):
+;;   Terminal mouse (x,y) [1-based SGR]
+;;     → frame-xy->leaf frm x y          [1→0 based, leaf resolution]
+;;     → leaf-geometry frm lf             [rect boundary check]
+;;     → leaf-xy->buffer-pos lf geo x y   [local row,col + layout → byte-pos]
+;;     → dirty-set-point! / scroll        [apply to buffer state]
+;;
+;; Window boundaries are inherently correct because:
+;;   1. leaf-at-xy uses half-open intervals that partition the screen exactly
+;;   2. leaf-xy->buffer-pos recomputes the same layout as render-frame
+;;   3. 0-based conversion across all internal systems; 1→0 SGR happens once
+
+(define (handle-mouse-set-point! db frm ke)
+  ;; Move point to the buffer position under the mouse cursor.
+  ;; If click is on a different leaf, switch focus first.
+  (define lf (frame-xy->leaf frm (key-mouse-x ke) (key-mouse-y ke)))
+  (unless lf (values db frm #f))
+  ;; Switch focus if needed
+  (when (and lf (not (eq? lf (frame-selected frm))))
+    (frame-select! frm lf))
+  ;; Convert leaf-local coordinates to buffer position
+  (define geo (leaf-geometry frm lf))
+  (define local-x (- (sub1 (key-mouse-x ke)) (rect-left geo)))
+  (define local-y (- (sub1 (key-mouse-y ke)) (rect-top geo)))
+  (define buf-pos (leaf-xy->buffer-pos lf geo local-x local-y))
+  (if buf-pos
+      (values (dirty-set-point! db buf-pos) frm #t)
+      (values db frm #f)))
+
+(define (handle-mouse-scroll! db frm ke)
+  ;; Scroll the leaf under the mouse cursor.
+  ;; Scroll amount: 3 lines per wheel tick.
+  (define lf (frame-xy->leaf frm (key-mouse-x ke) (key-mouse-y ke)))
+  (unless lf (values db frm #f))
+  (define buf (leaf-buffer lf))
+  (define gb  (text-gap (buffer-text buf)))
+  (define ws  (marker-pos (leaf-start lf)))
+  (define dir (key-mouse-button ke))  ;; 'wheel-up or 'wheel-down
+  (define lines 3)
+  (define (nl? b) (= b #x0A))
+  (define new-start
+    (if (eq? dir 'wheel-up)
+        ;; Scroll up: move start backward N lines
+        (let loop ([p ws] [n lines])
+          (if (or (<= p 0) (zero? n))
+              p
+              (let ([nl (gap-scan-byte gb (max 0 (sub1 p)) 'backward nl?)])
+                (if (< nl 0) 0 (loop nl (sub1 n))))))
+        ;; Scroll down: move start forward N lines
+        (let loop ([p ws] [n lines])
+          (if (or (>= p (gap-length gb)) (zero? n))
+              p
+              (let ([nl (gap-scan-byte gb p 'forward nl?)])
+                (if (>= nl (gap-length gb))
+                    (gap-length gb)
+                    (loop (add1 nl) (sub1 n))))))))
+  (when (not (= new-start ws))
+    (apply-scroll! lf new-start (leaf-hscroll lf)))
+  (values db frm #t))
 
 ;; ============================================================
 ;; ============================================================
@@ -140,7 +204,21 @@
    (cons (key-sym 'resize)
          (window-cmd (λ (frm)
                        (detect-terminal-size!)
-                       (frame-resize frm (terminal-width) (terminal-height)))))))
+                       (frame-resize frm (terminal-width) (terminal-height)))))
+
+   ;; ── Mouse: click to set point ──
+   ;; Left click at any terminal position → move point there.
+   ;; Works across all leaves; clicks on non-selected leaves switch focus.
+   ;; Uses the unified frame-xy->leaf + leaf-xy->buffer-pos pipeline.
+   (cons (cons 'left 'press)
+         (mouse-cmd handle-mouse-set-point!))
+   (cons (cons 'left 'move)
+         (mouse-cmd handle-mouse-set-point!))
+   ;; Scroll wheel
+   (cons (cons 'wheel-up 'scroll)
+         (mouse-cmd handle-mouse-scroll!))
+   (cons (cons 'wheel-down 'scroll)
+         (mouse-cmd handle-mouse-scroll!))))
 
 ;; ============================================================
 ;; Per-leaf row cache management
