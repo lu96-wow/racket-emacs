@@ -187,8 +187,11 @@
             [target-col  col]  ;; col is screen-local; buf-pos already accounts for hscroll
             [end-buf-pos (visual-line-end-buf-pos vl)])
        (if (>= target-col (gap-display-width gb buf-pos end-buf-pos))
-           ;; Past end of this visual line → clamp to line end
-           end-buf-pos
+           ;; Past end of this visual line → clamp to end of line (before newline if present)
+           (if (and (> end-buf-pos buf-pos)
+                    (= (gap-byte-ref gb (sub1 end-buf-pos)) #x0A))
+               (sub1 end-buf-pos)
+               end-buf-pos)
            (scan-display-width gb buf-pos end-buf-pos target-col)))]))
 
 ;; ============================================================
