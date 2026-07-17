@@ -14,6 +14,8 @@
  key-char? key-char key-char-ch
  key-ctrl? key-ctrl key-ctrl-ch
  key-sym?  key-sym  key-sym-name
+ key-mouse? key-mouse key-mouse-button key-mouse-x key-mouse-y
+ key-mouse-action key-mouse-mods
 
  ;; classification
  key-self-insert?
@@ -33,6 +35,12 @@
 (struct key-sym (name) #:transparent)
 ;; name : symbol? — 'up 'down 'left 'right 'return 'backspace 'tab
 ;;        'delete 'home 'end 'escape 'idle ...
+
+(struct key-mouse (button x y action mods) #:transparent)
+;; button : symbol? — 'left 'middle 'right 'wheel-up 'wheel-down
+;; x y    : exact-nonnegative-integer? — terminal column/row (0-based)
+;; action : symbol? — 'press 'release 'move 'scroll
+;; mods   : exact-nonnegative-integer? — modifier bitmask
 
 ;; ============================================================
 ;; Classification
