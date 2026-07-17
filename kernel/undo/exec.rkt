@@ -40,19 +40,20 @@
 ;; ============================================================
 ;; Walk records FORWARD.
 ;; For undo-insert: undo already deleted the text, so redo is a no-op
-;;   (delete on an empty range does nothing).
-;; For undo-delete: undo re-inserted the text, so redo deletes it.
+;; For undo-insert with captured text: re-insert it.
+;; For undo-insert without text: delete (no-op on empty range).
+;; For undo-delete: undo re-inserted, so redo deletes.
 
 (define (execute-redo! tx group)
   (define records (undo-group-records group))
   (for ([rec (in-list records)])
     (cond
       [(undo-insert? rec)
-       ;; Redo of an insert: text was already deleted by undo.
-       ;; Delete again — range is empty, this is effectively a no-op.
-       (text-delete! tx (undo-insert-beg rec) (undo-insert-end rec))]
+       (if (undo-insert-text rec)
+           (text-insert! tx (undo-insert-beg rec)
+                         (string->bytes/utf-8 (undo-insert-text rec)))
+           (text-delete! tx (undo-insert-beg rec) (undo-insert-end rec)))]
       [(undo-delete? rec)
-       ;; Redo of a delete: text was restored by undo, delete it again.
        (define dtext (undo-delete-text rec))
        (define dlen (bytes-length (string->bytes/utf-8 dtext)))
        (text-delete! tx (undo-delete-beg rec) (+ (undo-delete-beg rec) dlen))])))

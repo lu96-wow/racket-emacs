@@ -119,37 +119,48 @@
 ;; ============================================================
 
 (define (buffer-undo! buf)
-  ;; Returns (values start end) of the undone change, or (values #f #f).
+  ;; Returns (values start end) of the undone change range,
+  ;; clamped to current buffer length, or (values #f #f).
   (define rec (buffer-undo-recorder buf))
-  (and (pair? (undo-recorder-undo-stack rec))
-       (let* ([group (car (undo-recorder-undo-stack rec))]
-              [tx (buffer-text buf)]
-              [range (undo-group-range group)])
-         (set-undo-recorder-undo-stack! rec
-           (cdr (undo-recorder-undo-stack rec)))
-         (execute-undo! tx group)
-         (restore-point-after-undo! buf group)
-         (set-undo-recorder-redo-stack! rec
-           (cons group (undo-recorder-redo-stack rec)))
-         (set-buffer-modified?! buf #t)
-         (set-buffer-modiff! buf (add1 (buffer-modiff buf)))
-         (values (car range) (cdr range)))))
+  (if (pair? (undo-recorder-undo-stack rec))
+      (let* ([group (car (undo-recorder-undo-stack rec))]
+             [tx (buffer-text buf)])
+        ;; Capture text of inserts BEFORE undo deletes them (needed for redo)
+        (for ([r (in-list (undo-group-records group))]
+              #:when (undo-insert? r))
+          (set-undo-insert-text! r
+            (buffer-substring buf (undo-insert-beg r) (undo-insert-end r))))
+        (set-undo-recorder-undo-stack! rec
+          (cdr (undo-recorder-undo-stack rec)))
+        (execute-undo! tx group)
+        (restore-point-after-undo! buf group)
+        (set-undo-recorder-redo-stack! rec
+          (cons group (undo-recorder-redo-stack rec)))
+        (set-buffer-modified?! buf #t)
+        (set-buffer-modiff! buf (add1 (buffer-modiff buf)))
+        (define buflen (buffer-length buf))
+        (define raw (undo-group-range group))
+        (values (min (car raw) buflen) (min (cdr raw) buflen)))
+      (values #f #f)))
 
 (define (buffer-redo! buf)
-  ;; Returns (values start end) of the redone change, or (values #f #f).
+  ;; Returns (values start end) of the redone change range,
+  ;; clamped to current buffer length, or (values #f #f).
   (define rec (buffer-undo-recorder buf))
-  (and (pair? (undo-recorder-redo-stack rec))
-       (let* ([group (car (undo-recorder-redo-stack rec))]
-              [tx (buffer-text buf)]
-              [range (undo-group-range group)])
-         (set-undo-recorder-redo-stack! rec
-           (cdr (undo-recorder-redo-stack rec)))
-         (execute-redo! tx group)
-         (set-undo-recorder-undo-stack! rec
-           (cons group (undo-recorder-undo-stack rec)))
-         (set-buffer-modified?! buf #t)
-         (set-buffer-modiff! buf (add1 (buffer-modiff buf)))
-         (values (car range) (cdr range)))))
+  (if (pair? (undo-recorder-redo-stack rec))
+      (let* ([group (car (undo-recorder-redo-stack rec))]
+             [tx (buffer-text buf)])
+        (set-undo-recorder-redo-stack! rec
+          (cdr (undo-recorder-redo-stack rec)))
+        (execute-redo! tx group)
+        (set-undo-recorder-undo-stack! rec
+          (cons group (undo-recorder-undo-stack rec)))
+        (set-buffer-modified?! buf #t)
+        (set-buffer-modiff! buf (add1 (buffer-modiff buf)))
+        (define buflen (buffer-length buf))
+        (define raw (undo-group-range group))
+        (values (min (car raw) buflen) (min (cdr raw) buflen)))
+      (values #f #f)))
 
 ;; ============================================================
 ;; undo-group-range — compute the byte range affected by a group

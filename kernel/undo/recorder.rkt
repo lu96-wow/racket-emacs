@@ -54,11 +54,11 @@
      ;; Extend previous insert — merge into one range
      (define prev (car p))
      (set-undo-recorder-pending! rec
-       (cons (undo-insert (undo-insert-beg prev) byte-end)
+       (cons (undo-insert (undo-insert-beg prev) byte-end #f)
              (cdr p)))]
     [else
      (set-undo-recorder-pending! rec
-       (cons (undo-insert byte-pos byte-end) p))]))
+       (cons (undo-insert byte-pos byte-end #f) p))]))
 
 (define (recorder-record-delete! rec text byte-pos)
   ;; Record a delete. Text IS stored so undo can restore it.

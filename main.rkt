@@ -86,10 +86,10 @@
    ";; Keys:\n"
    ";;   C-f C-b C-n C-p     move cursor\n"
    ";;   C-a C-e             beginning/end of line\n"
-   ";;   C-d                 forward-delete\n"
+   ";;   C-u                 forward-delete\n"
    ";;   C-k                 kill line\n"
    ";;   C-y                 yank (paste)\n"
-   ";;   C-_ C-r             undo / redo\n"
+   ";;   C-z C-x             undo / redo\n"
    ";;   C-t C-l             forward/backward word\n"
    ";;   C-w C-q             kill word forward/backward\n"
    ";;   C-s C-j             forward/backward sexp\n"
@@ -193,11 +193,11 @@
    (cons (key-ctrl #\b) (edit-cmd cmd-backward-char))
    (cons (key-ctrl #\p) (edit-cmd cmd-prev-line))
    (cons (key-ctrl #\n) (edit-cmd cmd-next-line))
-   (cons (key-ctrl #\d) (edit-cmd cmd-forward-delete))
+   (cons (key-ctrl #\u) (edit-cmd cmd-forward-delete))
    (cons (key-ctrl #\k) (edit-cmd cmd-kill-line))
    (cons (key-ctrl #\y) (edit-cmd cmd-yank))
-   (cons (key-ctrl #\_) (edit-cmd cmd-undo))
-   (cons (key-ctrl #\r) (edit-cmd cmd-redo))
+   (cons (key-ctrl #\z) (edit-cmd cmd-undo))
+   (cons (key-ctrl #\x) (edit-cmd cmd-redo))
 
    ;; Word / sexp movement — syntax-table driven (M-f/M-b not in parse layer yet)
    (cons (key-ctrl #\t) (word-cmd cmd-forward-word))    ;; C-t = forward-word  (→)

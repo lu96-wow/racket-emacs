@@ -16,10 +16,12 @@
 
 (provide
  undo-insert undo-insert? undo-insert-beg undo-insert-end
+ undo-insert-text set-undo-insert-text!
  undo-delete undo-delete? undo-delete-text undo-delete-beg
  undo-group undo-group? undo-group-records)
 
-(struct undo-insert (beg end) #:transparent)
+(struct undo-insert (beg end [text #:mutable]) #:transparent)
+;; text is #f until undo captures it; then redo uses it to re-insert
 
 (struct undo-delete (text beg) #:transparent)
 
