@@ -314,11 +314,15 @@
 ;; ============================================================
 
 (define (attach-leaf-point! lf)
-  ;; Called when a leaf GAINS focus.  Its point marker becomes
-  ;; the buffer's point-marker, so edit commands directly affect
-  ;; this leaf's cursor position.
+  ;; Called when a leaf GAINS focus.  First moves buffer-point to
+  ;; this leaf's saved cursor position, then shares the marker so
+  ;; edit commands directly affect this leaf's cursor.
   (define buf (leaf-buffer lf))
   (define tx  (buffer-text buf))
+  ;; Move buffer-point to leaf's saved position
+  (text-set-marker-pos! tx (buffer-point-marker buf)
+                         (text-marker-pos tx (leaf-point lf)))
+  ;; Share the marker
   (set-leaf-point! lf (buffer-point-marker buf)))
 
 ;; ============================================================
@@ -568,4 +572,20 @@
     (check-equal? (marker-pos (leaf-start lf)) 0)
     (check-equal? (marker-pos (leaf-point lf)) 0)
     (check-equal? (leaf-hscroll lf) 0))
+
+  (test-case "focus switch preserves each leaf's buffer position"
+    (define buf (test-buf "line one\nline two\nline three\n"))
+    (define frm (make-frame buf 80 24))
+    (define leaf-a (frame-selected frm))
+    ;; Move point in leaf A to position 5
+    (set-buffer-point! buf 5)
+    (check-equal? (buffer-point buf) 5)
+    ;; Split → leaf B created, leaf A detached
+    (define leaf-b (frame-split-leaf! frm 'vertical))
+    ;; After split, leaf B is selected; its point should be buffer-point
+    (check-eq? (leaf-point leaf-b) (buffer-point-marker buf))
+    ;; Switch back to leaf A → buffer point should jump to A's saved position (5)
+    (frame-select! frm leaf-a)
+    (check-eq? (leaf-point leaf-a) (buffer-point-marker buf))
+    (check-equal? (buffer-point buf) 5))
 )
