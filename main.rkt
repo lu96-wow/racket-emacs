@@ -2,26 +2,42 @@
 
 ;; main.rkt — Event loop wiring all layers together
 ;;
-;; Architecture (data flows top to bottom):
+;; Data flows top to bottom on every keystroke:
 ;;
-;;   stdin (raw bytes)  ──parse──→  key-event
-;;         │
-;;   dispatch (cmd-self-insert, cmd-forward-char, ...)
-;;         │
-;;   dirty-buffer  ←─  kernel/edit.rkt commands
-;;         │
-;;   fontify-changed!  ←─  lang/font-lock (syntax + keywords → text-props)
-;;         │
-;;   calc-scroll → apply-scroll!  (point visible? → adjust leaf markers)
-;;         │
-;;   compute-layout  ←─  buffer gap + point + frame geometry
-;;         │
-;;   render-layout/cached!  ←─  layout + text-props (faces!) + row-cache  →  vbuffer
-;;         │
-;;   terminal-flush-delta!  ←─  vbuffer + cache  →  ANSI to stdout
+;;   stdin (raw bytes)
+;;     │ parse
+;;     ▼
+;;   key-event  ──→  dispatch (cmd-self-insert, cmd-forward-char, ...)
+;;     │
+;;     ▼
+;;   dirty-buffer  ←─  kernel/edit.rkt (db → db, pure)
+;;     │
+;;     ├─→  syntax-update!  ←─  lang/apply.rkt
+;;     │      └─ syntax-scan! + keyword-scan! → writes face symbols into text-props
+;;     │
+;;     ├─→  calc-scroll → apply-scroll!  (point visible? → adjust leaf markers)
+;;     │
+;;     ├─→  compute-layout  (gap-buffer + point + geometry → visual-lines)
+;;     │
+;;     ├─→  render-layout/cached!  (visual-lines + text-props + row-cache → vbuffer)
+;;     │
+;;     └─→  terminal-flush-delta!  (vbuffer + prev-frame → ANSI → stdout)
+;;
+;; Module map:
+;;
+;;   kernel/     — data types + mutations (gap, text, buffer, dirty, edit)
+;;   display/    — layout, render, vbuffer, window tree, faces, row-cache
+;;   draw/       — vbuffer → ANSI terminal output
+;;   platform/   — raw terminal I/O, ANSI escape sequences
+;;   lang/       — syntax highlighting
+;;     syntax.rkt      — syntax-table data type (character classes, multi-char rules)
+;;     font-lock.rkt   — scanning engine (syntax-scan!, keyword-scan!, syntax-config)
+;;     define.rkt      — lang-def data type (faces + keywords + syntax-table)
+;;     apply.rkt       — unified entry (syntax-setup!, syntax-update!)
+;;     *-lang.rkt      — language data: racket, scheme, python
 ;;
 ;; All state is explicit.  Zero globals beyond the event loop's
-;; local bindings.
+;; local bindings and the face-cache / language registry.
 
 (require "display/vbuffer.rkt"
          "display/layout.rkt"
@@ -344,8 +360,8 @@
       (init-face-cache!)
       (define fc  (current-face-cache))
 
-      ;; Match language → activate faces → fontify entire buffer
-      (fontify-setup! buf)
+      ;; Match language → activate faces → scan entire buffer
+      (syntax-setup! buf)
 
       (define frm (make-frame buf (terminal-width) (terminal-height)))
       (define leaf-caches (make-hasheq))
@@ -372,7 +388,7 @@
              (invalidate-leaf-caches! leaf-caches))
            (when (and acted? (dirty-dirty? db2))
              (define ext (dirty-extent db2))
-             (when ext (fontify-change! buf ext))
+             (when ext (syntax-update! buf ext))
              (invalidate-leaf-caches! leaf-caches))
            (define new-cache
              (if (or acted? (not (eq? frm new-frm)))

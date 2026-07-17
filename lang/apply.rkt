@@ -1,14 +1,13 @@
 #lang racket
 
-;; lang/apply.rkt — Font-lock application layer
+;; lang/apply.rkt — Syntax highlighting application layer
 ;;
-;; Unified entry point for syntax highlighting.  Hides the details of
-;; language matching, face registration, and per-buffer config storage.
-;; The caller (main.rkt) sees three simple operations:
+;; Unified entry point.  Hides language matching, face registration,
+;; and per-buffer config storage.  The caller (main.rkt) sees:
 ;;
-;;   (fontify-setup! buf)         — match → activate → store config → fontify all
-;;   (fontify-change! buf extent) — incremental fontify after edit
-;;   (fontify-buffer! buf)        — full re-fontify
+;;   (syntax-setup! buf)         — match → activate → store config → scan all
+;;   (syntax-update! buf extent) — incremental scan after edit
+;;   (syntax-highlight-buffer! buf)  — full re-scan
 ;;
 ;; Dependencies: kernel/buffer, lang/font-lock, lang/define, display/face
 
@@ -23,9 +22,9 @@
 
 (provide
  ;; operations (caller sees only these)
- fontify-setup!
- fontify-change!
- fontify-buffer!
+ syntax-setup!
+ syntax-update!
+ syntax-highlight-buffer!
 
  ;; language list (caller populates this)
  available-languages)
@@ -42,10 +41,10 @@
 
 (define config-table (make-hasheq))
 
-(define (buffer-fl-config buf)
+(define (buffer-syntax-config buf)
   (hash-ref config-table buf (λ () #f)))
 
-(define (set-buffer-fl-config! buf cfg)
+(define (set-buffer-syntax-config! buf cfg)
   (hash-set! config-table buf cfg))
 
 ;; ============================================================
@@ -65,45 +64,43 @@
 ;; fontify-setup! — match → activate → store → fontify
 ;; ============================================================
 
-(define (fontify-setup! buf)
+(define (syntax-setup! buf)
   ;; 1. Match language by filename
   (define ld (or (match-language buf) (default-language)))
   ;; 2. Register faces in global face-cache
   (activate-language! ld)
-  ;; 3. Build font-lock config and store on buffer
-  (define fl-cfg (lang-def->font-lock-config ld))
-  (set-buffer-fl-config! buf fl-cfg)
-  ;; 4. Fontify entire buffer
-  (fontify-buffer! buf))
+  ;; 3. Build syntax config and store on buffer
+  (define cfg (lang-def->syntax-config ld))
+  (set-buffer-syntax-config! buf cfg)
+  ;; 4. Scan entire buffer
+  (syntax-highlight-buffer! buf))
 
 ;; ============================================================
-;; fontify-buffer! — full fontification
+;; syntax-highlight-buffer! — full scan
 ;; ============================================================
 
-(define (fontify-buffer! buf)
-  (define fl-cfg (buffer-fl-config buf))
-  (unless fl-cfg
-    (error 'fontify-buffer! "no font-lock config for buffer ~a"
+(define (syntax-highlight-buffer! buf)
+  (define cfg (buffer-syntax-config buf))
+  (unless cfg
+    (error 'syntax-highlight-buffer! "no syntax config for buffer ~a"
            (buffer-name buf)))
   (define buflen (buffer-length buf))
   (when (positive? buflen)
     (define gb (text-gap (buffer-text buf)))
     (define tp (buffer-text-props buf))
-    ;; Clear + fontify entire buffer
     (textprop-remove! tp 0 buflen)
-    (fontify-region! gb tp fl-cfg 0 buflen)))
+    (syntax-highlight-region! gb tp cfg 0 buflen)))
 
 ;; ============================================================
-;; fontify-change! — incremental fontify after edit
+;; syntax-update! — incremental scan after edit
 ;; ============================================================
 
-(define (fontify-change! buf extent)
-  ;; extent is (cons start end) from dirty-buffer
-  (define fl-cfg (buffer-fl-config buf))
-  (unless fl-cfg (void))
+(define (syntax-update! buf extent)
+  (define cfg (buffer-syntax-config buf))
+  (unless cfg (void))
   (define gb (text-gap (buffer-text buf)))
   (define tp (buffer-text-props buf))
-  (fontify-changed! gb tp fl-cfg extent))
+  (syntax-highlight-changed! gb tp cfg extent))
 
 ;; ============================================================
 ;; Tests
@@ -117,20 +114,19 @@
 
   (init-face-cache!)
 
-  (test-case "fontify-setup! on scratch buffer"
+  (test-case "syntax-setup! on scratch buffer"
     (define buf (make-buffer "*scratch*" ";; comment\n(define x 1)\n"))
-    (fontify-setup! buf)
-    (check-true (buffer-fl-config buf) "should have config")
+    (syntax-setup! buf)
+    (check-true (buffer-syntax-config buf) "should have config")
     (check-equal? (buffer-face-at buf 0) 'font-lock-comment-face)
     (check-equal? (buffer-face-at buf 13) 'font-lock-keyword-face))
 
-  (test-case "fontify-change! after edit"
+  (test-case "syntax-update! after edit"
     (define buf (make-buffer "*test*" "(define a 1)\n(define b 2)\n"))
-    (fontify-setup! buf)
+    (syntax-setup! buf)
     (buffer-insert! buf "xxx" 5)
     (define ext (cons 5 8))
-    (fontify-change! buf ext)
-    ;; After insert, original 'define' keyword face should be preserved
+    (syntax-update! buf ext)
     (check-equal? (buffer-face-at buf 2) 'font-lock-keyword-face))
 
   (test-case "match-language — .rkt file"

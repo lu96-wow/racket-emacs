@@ -1,22 +1,22 @@
 #lang racket
 
-;; lang/font-lock.rkt — Fontification engine
+;; lang/font-lock.rkt — Syntax highlighting engine
 ;;
-;; Language-specific text annotation: scans buffer text using syntax-table
-;; and keyword rules, writes face symbols to text-properties.
+;; Scans buffer text using syntax-table and keyword rules, writes
+;; face symbols to text-properties.
 ;;
 ;; Two passes:
-;;   fontify-syntax!    — syntax-table-driven (strings, comments, blocks)
-;;   fontify-keywords!  — regex-driven keyword highlighting
+;;   syntax-scan!   — syntax-table-driven (strings, comments, blocks)
+;;   keyword-scan!  — regex-driven keyword highlighting
 ;;
 ;; This module writes face SYMBOLS (e.g. 'font-lock-keyword-face),
 ;; not face-ids.  The render layer resolves symbols to face-ids via
 ;; display/face.rkt.
 ;;
 ;; Architecture:
-;;   syntax.rkt        — syntax-table (character classification)
-;;   font-lock.rkt     — scanning engine (writes face symbols to text-props)
-;;   display/render.rkt — reads text-props, resolves face-id
+;;   syntax.rkt          — syntax-table (character classification)
+;;   font-lock.rkt       — scanning engine (writes face symbols to text-props)
+;;   display/render.rkt  — reads text-props, resolves face-id
 ;;
 ;; Dependencies: kernel/data (gap, query, textprop), lang/syntax
 
@@ -27,40 +27,40 @@
 
 (provide
  ;; config
- font-lock-config? make-font-lock-config
- font-lock-config-syntax-table
- font-lock-config-keywords
- font-lock-config-case-fold?
+ syntax-config? make-syntax-config
+ syntax-config-syntax-table
+ syntax-config-keywords
+ syntax-config-case-fold?
 
  ;; passes
- fontify-syntax!
- fontify-keywords!
+ syntax-scan!
+ keyword-scan!
 
  ;; orchestration
- fontify-region!
- fontify-changed!)
+ syntax-highlight-region!
+ syntax-highlight-changed!)
 
 ;; ============================================================
 ;; Config
 ;; ============================================================
 
-(struct font-lock-config
+(struct syntax-config
   (syntax-table  ; syntax-table? | #f
    keywords      ; (listof (cons pregexp? symbol?)) — first match wins
    case-fold?)   ; boolean?
   #:transparent)
 
-(define (make-font-lock-config
+(define (make-syntax-config
          #:syntax-table [st #f]
          #:keywords    [keywords '()]
          #:case-fold?  [case-fold? #f])
-  (font-lock-config st keywords case-fold?))
+  (syntax-config st keywords case-fold?))
 
 ;; ============================================================
 ;; Syntax pass — syntax-table-driven
 ;; ============================================================
 
-(define (fontify-syntax! gb tp st beg end)
+(define (syntax-scan! gb tp st beg end)
   ;; Walk bytes [beg, end), assign face symbols based on syntax-table st.
   ;; Handles: line comments, strings, block-comments, heredoc.
   (define len (min end (gap-length gb)))
@@ -164,7 +164,7 @@
 ;; Keyword pass — regex match → face symbol
 ;; ============================================================
 
-(define (fontify-keywords! gb tp keywords beg end case-fold?)
+(define (keyword-scan! gb tp keywords beg end case-fold?)
   ;; Match regex keywords in [beg, end).  Only write face if position
   ;; doesn't already have a face (syntax pass has priority).
   (when (null? keywords) (void))
@@ -207,21 +207,21 @@
 ;; Orchestration
 ;; ============================================================
 
-(define (fontify-region! gb tp config beg end)
+(define (syntax-highlight-region! gb tp config beg end)
   ;; Clear old faces + run passes for the given region.
   (when (and config (< beg end))
     (textprop-remove! tp beg end)
-    (when (font-lock-config-syntax-table config)
-      (fontify-syntax! gb tp (font-lock-config-syntax-table config) beg end))
-    (when (pair? (font-lock-config-keywords config))
-      (fontify-keywords! gb tp
-                         (font-lock-config-keywords config)
-                         beg end
-                         (font-lock-config-case-fold? config)))))
+    (when (syntax-config-syntax-table config)
+      (syntax-scan! gb tp (syntax-config-syntax-table config) beg end))
+    (when (pair? (syntax-config-keywords config))
+      (keyword-scan! gb tp
+                     (syntax-config-keywords config)
+                     beg end
+                     (syntax-config-case-fold? config)))))
 
-(define (fontify-changed! gb tp config change-extent)
+(define (syntax-highlight-changed! gb tp config change-extent)
   ;; Incremental: extend change region to catch multi-line constructs,
-  ;; then fontify.
+  ;; then highlight.
   (match-define (cons start end) change-extent)
   (define buflen (gap-length gb))
 
@@ -242,7 +242,7 @@
           (min nl buflen)
           (loop (add1 nl) (sub1 remaining)))))
 
-  (fontify-region! gb tp config sol eol))
+  (syntax-highlight-region! gb tp config sol eol))
 
 ;; ============================================================
 ;; Tests
@@ -259,8 +259,8 @@
     (let* ([gb (make-gb "x ;; comment\ny")]
            [tp (make-tp)]
            [st (make-racket-syntax-table)]
-           [cfg (make-font-lock-config #:syntax-table st)])
-      (fontify-syntax! gb tp st 0 (gap-length gb))
+           [cfg (make-syntax-config #:syntax-table st)])
+      (syntax-scan! gb tp st 0 (gap-length gb))
       (check-equal? (textprop-get tp 4 'face) 'font-lock-comment-face)
       (check-false (textprop-get tp 0 'face #f))
       (check-false (textprop-get tp 15 'face #f))))
@@ -269,7 +269,7 @@
     (let* ([gb (make-gb "\"hello\" abc")]
            [tp (make-tp)]
            [st (make-racket-syntax-table)])
-      (fontify-syntax! gb tp st 0 (gap-length gb))
+      (syntax-scan! gb tp st 0 (gap-length gb))
       (check-equal? (textprop-get tp 0 'face) 'font-lock-string-face)
       (check-equal? (textprop-get tp 2 'face) 'font-lock-string-face)
       (check-false (textprop-get tp 8 'face #f))))
@@ -278,7 +278,7 @@
     (let* ([gb (make-gb "x #| comment |# y")]
            [tp (make-tp)]
            [st (make-racket-syntax-table)])
-      (fontify-syntax! gb tp st 0 (gap-length gb))
+      (syntax-scan! gb tp st 0 (gap-length gb))
       (check-equal? (textprop-get tp 4 'face) 'font-lock-comment-face)
       (check-false (textprop-get tp 0 'face #f))))
 
@@ -286,7 +286,7 @@
     (let* ([gb (make-gb "#| outer #| inner |# outer |# after")]
            [tp (make-tp)]
            [st (make-racket-syntax-table)])
-      (fontify-syntax! gb tp st 0 (gap-length gb))
+      (syntax-scan! gb tp st 0 (gap-length gb))
       (check-equal? (textprop-get tp 2 'face) 'font-lock-comment-face)
       (check-equal? (textprop-get tp 20 'face) 'font-lock-comment-face)
       (check-false (textprop-get tp 32 'face #f))))
@@ -295,27 +295,27 @@
     (let* ([gb (make-gb "(define x 42)")]
            [tp (make-tp)]
            [kw (list (cons (pregexp "\\bdefine\\b") 'font-lock-keyword-face))])
-      (fontify-keywords! gb tp kw 0 (gap-length gb) #f)
+      (keyword-scan! gb tp kw 0 (gap-length gb) #f)
       (check-equal? (textprop-get tp 2 'face) 'font-lock-keyword-face)))
 
-  (test-case "region fontify"
+  (test-case "region highlight"
     (let* ([gb (make-gb "(define x 42) ;; answer\n(+ x 1)")]
            [tp (make-tp)]
            [st (make-racket-syntax-table)]
            [kw (list (cons (pregexp "\\bdefine\\b") 'font-lock-keyword-face))]
-           [cfg (make-font-lock-config #:syntax-table st #:keywords kw)])
-      (fontify-region! gb tp cfg 0 (gap-length gb))
+           [cfg (make-syntax-config #:syntax-table st #:keywords kw)])
+      (syntax-highlight-region! gb tp cfg 0 (gap-length gb))
       (check-equal? (textprop-get tp 2 'face) 'font-lock-keyword-face)
       ;; Comment face on later byte (after ;;)
       (check-true (textprop-get tp 14 'face #f))))
 
-  (test-case "incremental: fontify-changed! extends region"
+  (test-case "incremental: syntax-highlight-changed! extends region"
     (let* ([gb (make-gb "line1\nline2 ;; comment\nline3")]
            [tp (make-tp)]
            [st (make-racket-syntax-table)]
-           [cfg (make-font-lock-config #:syntax-table st)])
+           [cfg (make-syntax-config #:syntax-table st)])
       ;; Pretend only bytes 14-20 changed
-      (fontify-changed! gb tp cfg (cons 14 20))
+      (syntax-highlight-changed! gb tp cfg (cons 14 20))
       ;; Should have caught ";; comment" by extending backward to start of line
       (check-equal? (textprop-get tp 13 'face) 'font-lock-comment-face)))
 )

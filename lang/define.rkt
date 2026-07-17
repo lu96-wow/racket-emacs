@@ -24,7 +24,7 @@
  lang-def-syntax-table lang-def-keywords lang-def-faces
 
  ;; pure conversions
- lang-def->font-lock-config  ; lang-def → font-lock-config
+ lang-def->syntax-config  ; lang-def → syntax-config
 
  ;; application (imperative — registers faces into global face-cache)
  activate-language!)         ; lang-def → void
@@ -43,11 +43,11 @@
   #:transparent)
 
 ;; ============================================================
-;; lang-def->font-lock-config — pure
+;; lang-def->syntax-config — pure
 ;; ============================================================
 
-(define (lang-def->font-lock-config ld)
-  (make-font-lock-config
+(define (lang-def->syntax-config ld)
+  (make-syntax-config
    #:syntax-table (lang-def-syntax-table ld)
    #:keywords     (lang-def-keywords ld)
    #:case-fold?   #f))
@@ -82,10 +82,10 @@
     (check-equal? (length (lang-def-keywords test-lang)) 1)
     (check-equal? (length (lang-def-faces test-lang)) 1))
 
-  (test-case "lang-def->font-lock-config"
-    (define cfg (lang-def->font-lock-config test-lang))
-    (check-true (font-lock-config? cfg))
-    (check-equal? (length (font-lock-config-keywords cfg)) 1))
+  (test-case "lang-def->syntax-config"
+    (define cfg (lang-def->syntax-config test-lang))
+    (check-true (syntax-config? cfg))
+    (check-equal? (length (syntax-config-keywords cfg)) 1))
 
   (test-case "activate-language! registers faces"
     (init-face-cache!)
