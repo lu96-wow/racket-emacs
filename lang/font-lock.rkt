@@ -221,18 +221,24 @@
 
 (define (syntax-highlight-changed! gb tp config change-extent)
   ;; Incremental: extend change region to catch multi-line constructs,
-  ;; then highlight.
+  ;; then highlight.  Line comments need the comment-start char (;) to
+  ;; be within the scan range; when no newline exists between the edit
+  ;; point and the comment marker (same line), we fall back to buffer start.
   (match-define (cons start end) change-extent)
   (define buflen (gap-length gb))
 
-  ;; Extend backward up to 15 lines
+  ;; Extend backward up to 15 lines.  If no newline found (first line
+  ;; of buffer), go to position 0 to catch comment-start chars.
   (define sol
     (let loop ([pos start] [remaining 15])
       (if (or (zero? pos) (zero? remaining))
           pos
           (let ([prev-nl (gap-scan-byte gb (sub1 pos) 'backward
                                         (λ (b) (= b #x0A)))])
-            (if (>= prev-nl 0) (loop (add1 prev-nl) (sub1 remaining)) pos)))))
+            (if (>= prev-nl 0)
+                (loop (add1 prev-nl) (sub1 remaining))
+                ;; No newline before edit point — scan from buffer start
+                0)))))
 
   ;; Extend forward up to 15 lines
   (define eol
@@ -318,4 +324,30 @@
       (syntax-highlight-changed! gb tp cfg (cons 14 20))
       ;; Should have caught ";; comment" by extending backward to start of line
       (check-equal? (textprop-get tp 13 'face) 'font-lock-comment-face)))
+
+  (test-case "incremental: edit after ;; on same line (no \\n before ;)"
+    (let* ([gb (make-gb ";; hello world")]
+           [tp (make-tp)]
+           [st (make-racket-syntax-table)]
+           [cfg (make-syntax-config #:syntax-table st)])
+      ;; Simulate editing at byte 10 (between "hello" and " world")
+      ;; Change extent starts at 10, no \n before byte 10 on this line
+      (syntax-highlight-changed! gb tp cfg (cons 10 11))
+      ;; The " world" after byte 9 should still be comment
+      (check-equal? (textprop-get tp 10 'face) 'font-lock-comment-face)
+      ;; The ;; at byte 0 should also be comment
+      (check-equal? (textprop-get tp 0 'face) 'font-lock-comment-face)))
+
+  (test-case "incremental: edit after ;; on first line of multi-line buffer"
+    (let* ([gb (make-gb ";; comment here\nnot comment")]
+           [tp (make-tp)]
+           [st (make-racket-syntax-table)]
+           [cfg (make-syntax-config #:syntax-table st)])
+      ;; Edit at end of comment line (byte 14, "ere")
+      (syntax-highlight-changed! gb tp cfg (cons 14 15))
+      ;; After ;; should be comment
+      (check-equal? (textprop-get tp 3 'face) 'font-lock-comment-face)
+      (check-equal? (textprop-get tp 14 'face) 'font-lock-comment-face)
+      ;; After \n should NOT be comment
+      (check-false (textprop-get tp 17 'face #f))))
 )
