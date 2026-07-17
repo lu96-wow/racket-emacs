@@ -23,11 +23,7 @@
 
  ;; keymap composition (pure)
  keymap-merge        ;; base local → merged
-
- ;; per-buffer keymap storage (analogous to lang/apply's config-table)
- buffer-keymap-get   ;; buf → keymap | #f
- buffer-keymap-set!  ;; buf keymap → void
- buffer-keymap-resolve ;; buf global-km → effective keymap
+ keymap-resolve      ;; table buf fallback → effective keymap
 
  ;; dispatch
  dispatch-key
@@ -69,23 +65,18 @@
             (hash-set h k v))))
 
 ;; ============================================================
-;; Per-buffer keymap storage (analogous to lang/apply's config-table)
+;; keymap-resolve — pure lookup in caller-owned table
 ;; ============================================================
 
-(define buffer-keymap-table (make-hasheq))
-
-(define (buffer-keymap-get buf)
-  (hash-ref buffer-keymap-table buf (λ () #f)))
-
-(define (buffer-keymap-set! buf km)
-  (hash-set! buffer-keymap-table buf km))
-
-(define (buffer-keymap-resolve buf global-km)
-  ;; buf       : buffer?
-  ;; global-km : keymap — fallback when no buffer-local keymap
-  ;; → keymap  — global + buffer-local merged, or just global
-  (define local (buffer-keymap-get buf))
-  (if local (keymap-merge global-km local) global-km))
+(define (keymap-resolve table buf fallback)
+  ;; table    : (hash/c buffer? keymap?) — caller-owned; caller decides
+  ;;             whether mutable or immutable, where it lives, when to mutate.
+  ;; buf      : buffer?
+  ;; fallback : keymap — default when buf has no local keymap
+  ;; → keymap — (merge fallback local) if local exists, else fallback
+  ;; Pure — reads table, returns new keymap, no side effects.
+  (define local (hash-ref table buf (λ () #f)))
+  (if local (keymap-merge fallback local) fallback))
 
 ;; ============================================================
 ;; Command helpers — wrap kernel/edit + display/window into
@@ -202,18 +193,20 @@
     ;; key not in either
     (check-false (keymap-lookup merged (key-char #\z))))
 
-  (test-case "buffer-keymap-resolve"
+  (test-case "keymap-resolve: caller-owned table"
     (define global (make-keymap
                     (cons (key-char #\a) (edit-cmd cmd-forward-char))))
     (define local  (make-keymap
                     (cons (key-char #\x) (edit-cmd cmd-backward-delete))))
-    (define buf (make-buffer "*test*" ""))
-    ;; No buffer-local → returns global as-is
-    (define km1 (buffer-keymap-resolve buf global))
+    (define buf  (make-buffer "*test*" ""))
+    ;; Caller creates and owns the table
+    (define table (make-hasheq))
+    ;; No entry → fallback is used as-is
+    (define km1 (keymap-resolve table buf global))
     (check-true (procedure? (keymap-lookup km1 (key-char #\a))))
     (check-false (keymap-lookup km1 (key-char #\x)))
-    ;; Set buffer-local → merged (local overrides, global still accessible)
-    (buffer-keymap-set! buf local)
-    (define km2 (buffer-keymap-resolve buf global))
-    (check-true (procedure? (keymap-lookup km2 (key-char #\a))))
+    ;; Caller writes to the table
+    (hash-set! table buf local)
+    (define km2 (keymap-resolve table buf global))
+    (check-true (procedure? (keymap-lookup km2 (key-char #\a))))  ; global
     (check-true (procedure? (keymap-lookup km2 (key-char #\x))))))

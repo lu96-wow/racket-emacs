@@ -225,13 +225,6 @@
   frame-vb)
 
 ;; ============================================================
-;; Language setup — populate the registry once
-;; ============================================================
-
-(set-box! available-languages
-  (list racket-lang-def scheme-lang-def python-lang-def))
-
-;; ============================================================
 ;; Main event loop
 ;; ============================================================
 
@@ -252,8 +245,12 @@
       (init-face-cache!)
       (define fc  (current-face-cache))
 
+      ;; Language list + per-buffer config table (caller owns both)
+      (define lang-table (make-hasheq))
+      (define languages (list racket-lang-def scheme-lang-def python-lang-def))
+
       ;; Match language → activate faces → scan entire buffer
-      (syntax-setup! buf)
+      (syntax-setup! lang-table buf languages)
 
       (define frm (make-frame buf (terminal-width) (terminal-height)))
       (define leaf-caches (make-hasheq))
@@ -280,7 +277,7 @@
              (invalidate-leaf-caches! leaf-caches))
            (when (and acted? (dirty-dirty? db2))
              (define ext (dirty-extent db2))
-             (when ext (syntax-update! buf ext))
+             (when ext (syntax-update! lang-table buf ext))
              (invalidate-leaf-caches! leaf-caches))
            (define new-cache
              (if (or acted? (not (eq? frm new-frm)))

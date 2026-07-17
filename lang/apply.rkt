@@ -2,12 +2,14 @@
 
 ;; lang/apply.rkt — Syntax highlighting application layer
 ;;
-;; Unified entry point.  Hides language matching, face registration,
-;; and per-buffer config storage.  The caller (main.rkt) sees:
+;; Zero module-level state.  The caller owns the config table and
+;; language list, passing them as explicit arguments — same pattern
+;; as input/keymap.rkt's keymap-resolve.
 ;;
-;;   (syntax-setup! buf)         — match → activate → store config → scan all
-;;   (syntax-update! buf extent) — incremental scan after edit
-;;   (syntax-highlight-buffer! buf)  — full re-scan
+;;   (syntax-setup!    table buf languages) — match → activate → store → scan
+;;   (syntax-update!   table buf extent)    — incremental scan after edit
+;;   (syntax-highlight-buffer! table buf)   — full re-scan
+;;   (syntax-config-get table buf)          — read per-buffer config
 ;;
 ;; Dependencies: kernel/buffer, lang/font-lock, lang/define, display/face
 
@@ -21,40 +23,37 @@
          "racket-lang.rkt")  ; for default-language
 
 (provide
- ;; operations (caller sees only these)
+ ;; operations (table + languages passed explicitly by caller)
+ syntax-config-get
+ syntax-config-set!
  syntax-setup!
  syntax-update!
  syntax-highlight-buffer!
 
- ;; language list (caller populates this)
- available-languages)
+ ;; pure matching
+ match-language)
 
 ;; ============================================================
-;; Language registry — a plain list, populated by caller
+;; Per-buffer config access — caller owns the table
 ;; ============================================================
 
-(define available-languages (box '()))
+(define (syntax-config-get table buf)
+  ;; table : (hash/c buffer? syntax-config?) — caller-owned
+  (hash-ref table buf (λ () #f)))
+
+(define (syntax-config-set! table buf cfg)
+  (hash-set! table buf cfg))
 
 ;; ============================================================
-;; Per-buffer config storage
+;; Matching — filename → lang-def (pure)
 ;; ============================================================
 
-(define config-table (make-hasheq))
-
-(define (buffer-syntax-config buf)
-  (hash-ref config-table buf (λ () #f)))
-
-(define (set-buffer-syntax-config! buf cfg)
-  (hash-set! config-table buf cfg))
-
-;; ============================================================
-;; Matching — filename → lang-def
-;; ============================================================
-
-(define (match-language buf)
+(define (match-language buf languages)
+  ;; buf       : buffer?
+  ;; languages : (listof lang-def?) — caller-owned, no box needed
   (define fname (buffer-filename buf))
   (and fname
-       (for/or ([ld (in-list (unbox available-languages))])
+       (for/or ([ld (in-list languages)])
          (for/or ([pat (in-list (lang-def-patterns ld))])
            (and (string-contains? fname pat) ld)))))
 
@@ -64,23 +63,26 @@
 ;; fontify-setup! — match → activate → store → fontify
 ;; ============================================================
 
-(define (syntax-setup! buf)
+(define (syntax-setup! table buf languages)
+  ;; table     : (hash/c buffer? syntax-config?) — caller-owned
+  ;; buf       : buffer?
+  ;; languages : (listof lang-def?)
   ;; 1. Match language by filename
-  (define ld (or (match-language buf) (default-language)))
+  (define ld (or (match-language buf languages) (default-language)))
   ;; 2. Register faces in global face-cache
   (activate-language! ld)
   ;; 3. Build syntax config and store on buffer
   (define cfg (lang-def->syntax-config ld))
-  (set-buffer-syntax-config! buf cfg)
+  (syntax-config-set! table buf cfg)
   ;; 4. Scan entire buffer
-  (syntax-highlight-buffer! buf))
+  (syntax-highlight-buffer! table buf))
 
 ;; ============================================================
 ;; syntax-highlight-buffer! — full scan
 ;; ============================================================
 
-(define (syntax-highlight-buffer! buf)
-  (define cfg (buffer-syntax-config buf))
+(define (syntax-highlight-buffer! table buf)
+  (define cfg (syntax-config-get table buf))
   (unless cfg
     (error 'syntax-highlight-buffer! "no syntax config for buffer ~a"
            (buffer-name buf)))
@@ -95,8 +97,8 @@
 ;; syntax-update! — incremental scan after edit
 ;; ============================================================
 
-(define (syntax-update! buf extent)
-  (define cfg (buffer-syntax-config buf))
+(define (syntax-update! table buf extent)
+  (define cfg (syntax-config-get table buf))
   (unless cfg (void))
   (define gb (text-gap (buffer-text buf)))
   (define tp (buffer-text-props buf))
@@ -109,29 +111,30 @@
 (module+ test
   (require rackunit)
 
-  ;; Populate available languages for tests
-  (set-box! available-languages (list racket-lang-def))
-
   (init-face-cache!)
 
   (test-case "syntax-setup! on scratch buffer"
+    (define table (make-hasheq))
+    (define languages (list racket-lang-def))
     (define buf (make-buffer "*scratch*" ";; comment\n(define x 1)\n"))
-    (syntax-setup! buf)
-    (check-true (buffer-syntax-config buf) "should have config")
+    (syntax-setup! table buf languages)
+    (check-pred syntax-config? (syntax-config-get table buf) "should have config")
     (check-equal? (buffer-face-at buf 0) 'font-lock-comment-face)
     (check-equal? (buffer-face-at buf 13) 'font-lock-keyword-face))
 
   (test-case "syntax-update! after edit"
+    (define table (make-hasheq))
+    (define languages (list racket-lang-def))
     (define buf (make-buffer "*test*" "(define a 1)\n(define b 2)\n"))
-    (syntax-setup! buf)
+    (syntax-setup! table buf languages)
     (buffer-insert! buf "xxx" 5)
     (define ext (cons 5 8))
-    (syntax-update! buf ext)
+    (syntax-update! table buf ext)
     (check-equal? (buffer-face-at buf 2) 'font-lock-keyword-face))
 
   (test-case "match-language — .rkt file"
     (define buf (make-buffer "foo.rkt" "#lang racket\n"))
     (set-buffer-filename! buf "/home/user/foo.rkt")
-    (define ld (match-language buf))
-    (check-true ld)
+    (define ld (match-language buf (list racket-lang-def)))
+    (check-pred lang-def? ld)
     (check-eq? (lang-def-name ld) 'racket)))
