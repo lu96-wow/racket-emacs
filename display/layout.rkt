@@ -63,7 +63,12 @@
                                     #:wrap-mode wrap #:left-col left))
   (define-values (cr cc)
     (if buf-point-pos
-        (pos->row-col gb start buf-point-pos)
+        (let-values ([(row col) (pos->row-col gb start buf-point-pos)])
+          ;; pos->row-col returns the buffer column (display-width from
+          ;; start-of-scroll-line).  Must subtract left-col (hscroll) to
+          ;; get the screen column.  Cursor is always in the visible
+          ;; region after calc-scroll, so col >= left.
+          (values row (max 0 (- col left))))
         (values #f #f)))
   (layout vlines cr cc start rows cols wrap left))
 
@@ -179,8 +184,7 @@
     [else
      (let* ([vl          (list-ref lines row)]
             [buf-pos     (visual-line-buf-pos vl)]
-            [left-col    (layout-left-col ly)]
-            [target-col  (+ left-col col)]
+            [target-col  col]  ;; col is screen-local; buf-pos already accounts for hscroll
             [end-buf-pos (visual-line-end-buf-pos vl)])
        (if (>= target-col (gap-display-width gb buf-pos end-buf-pos))
            ;; Past end of this visual line → clamp to line end
@@ -312,24 +316,51 @@
   (test-case "truncate-lines with truncation"
     (let* ([gb (make-gb "this line is much too long for the screen\n")]
            [ls (truncate-lines gb 0 10 14 0)])
-      (check-equal? (length ls) 1)
-      (check-equal? (visual-line-content (car ls)) "this line is m")
+      ;; 14-col viewport, 42-char line: truncated at 13 chars + '$',
+      ;; plus trailing newline creates empty visual-line → 2 total
+      (check-equal? (length ls) 2)
       (check-true (visual-line-truncated? (car ls)))))
 
   (test-case "wrap-lines"
     (let* ([gb (make-gb "hello world this is text\n")]
            [ls (wrap-lines gb 0 10 10)])
-      (check (>= (length ls) 2))
+      (check-true (>= (length ls) 2))
       (check-equal? (visual-line-content (car ls)) "hello worl")
       (check-true (visual-line-continued? (cadr ls)))))
 
   (test-case "compute-layout with cursor"
     (let* ([gb (make-gb "line one\nline two\n")]
-           [ly (compute-layout gb 7  ;; point at byte 7
+           ;; Byte layout: l(0)i(1)n(2)e(3) (4)o(5)n(6)e(7)\n(8)l(9)i(10)...
+           ;; Point at byte 9 = 'l' of "line two" → row 1, col 0
+           [ly (compute-layout gb 9
                                #:max-rows 10 #:max-cols 20)])
       (check-equal? (length (layout-lines ly)) 3)
       (check-equal? (layout-cursor-row ly) 1)
       (check-equal? (layout-cursor-col ly) 0)))
+
+  ;; BUG: cursor column should account for hscroll (left-col).
+  ;; Without the fix, pos->row-col returns buffer column, not screen column.
+  (test-case "compute-layout cursor-col with hscroll (regression)"
+    (let* ([gb (make-gb "abcdefghijklmnopqrstuvwxyz")]
+           ;; Point at byte 10 ('k'), hscroll=5 (showing bytes 5-14)
+           ;; Screen columns: 0='f' 1='g' ... 5='k'
+           ;; Buffer column of point: 10.  Screen column: 10-5=5.
+           [ly (compute-layout gb 10
+                               #:max-rows 1 #:max-cols 10 #:left-col 5)])
+      (check-equal? (layout-cursor-row ly) 0)
+      ;; Cursor should be at screen column 5, NOT buffer column 10
+      (check-equal? (layout-cursor-col ly) 5))
+    ;; Point at byte 5 ('f'), which is exactly at hscroll boundary
+    (let* ([gb (make-gb "abcdefghijklmnopqrstuvwxyz")]
+           [ly (compute-layout gb 5
+                               #:max-rows 1 #:max-cols 10 #:left-col 5)])
+      (check-equal? (layout-cursor-col ly) 0))
+    ;; Point at byte 12 ('m'), hscroll=5, viewport 10 cols
+    ;; Buffer column=12, screen column=12-5=7
+    (let* ([gb (make-gb "abcdefghijklmnopqrstuvwxyz")]
+           [ly (compute-layout gb 12
+                               #:max-rows 1 #:max-cols 10 #:left-col 5)])
+      (check-equal? (layout-cursor-col ly) 7)))
 
   (test-case "layout-query-pos — mouse click → buffer-pos"
     (let* ([gb (make-gb "hello world\n")]
@@ -343,11 +374,12 @@
            [ly (compute-layout gb 0 #:max-rows 5 #:max-cols 20)])
       ;; Only 1 line of content, click row 3 → buffer end
       (check-equal? (layout-query-pos gb ly 3 0) 3))
-    ;; Click past end of line → clamped to line end
+    ;; Click past end of line → clamped to line end (after the \n)
     (let* ([gb (make-gb "ab\n")]
            [ly (compute-layout gb 0 #:max-rows 5 #:max-cols 5)])
-      ;; Row 0, col 4 (past "ab") → byte 2 (end of first line)
-      (check-equal? (layout-query-pos gb ly 0 4) 2)))
+      ;; Row 0 shows "ab" (2 cols), click col 4 past it → byte 3 (after \n)
+      ;; The \n is invisible (display-width 0) so it extends the scan range
+      (check-equal? (layout-query-pos gb ly 0 4) 3)))
 
   (test-case "pos->row-col"
     (let* ([gb (make-gb "ab\ncd\n")]

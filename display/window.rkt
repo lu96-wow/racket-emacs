@@ -655,12 +655,13 @@
     (define frm (make-frame buf 80 24))
     (define lf (frame-selected frm))
     (define geo (leaf-geometry frm lf))
+    ;; "hello world\nline two" = 20 bytes (0-19)
     ;; Click at leaf-local (0,0) → first byte of buffer
     (check-equal? (leaf-xy->buffer-pos lf geo 0 0) 0)
     ;; Click at (6, 0) → 'w' at byte 6
     (check-equal? (leaf-xy->buffer-pos lf geo 6 0) 6)
-    ;; Click below content → buffer end
-    (check-equal? (leaf-xy->buffer-pos lf geo 0 10) 19))
+    ;; Click below content → buffer end (20)
+    (check-equal? (leaf-xy->buffer-pos lf geo 0 10) 20))
 
   (test-case "leaf-xy->buffer-pos with hscroll"
     (define buf (test-buf "abcdefghijklmnopqrstuvwxyz"))
