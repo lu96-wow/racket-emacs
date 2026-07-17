@@ -115,51 +115,40 @@
 
 (define (handle-mouse-set-point! db frm ke)
   ;; Move point to the buffer position under the mouse cursor.
-  ;; If click is on a different leaf, switch focus first.
-  (define lf (frame-xy->leaf frm (key-mouse-x ke) (key-mouse-y ke)))
-  (unless lf (values db frm #f))
-  ;; Switch focus if needed
-  (when (and lf (not (eq? lf (frame-selected frm))))
-    (frame-select! frm lf))
-  ;; Convert leaf-local coordinates to buffer position
-  (define geo (leaf-geometry frm lf))
-  (define local-x (- (sub1 (key-mouse-x ke)) (rect-left geo)))
-  (define local-y (- (sub1 (key-mouse-y ke)) (rect-top geo)))
-  (define buf-pos (leaf-xy->buffer-pos lf geo local-x local-y))
-  (if buf-pos
-      (values (dirty-set-point! db buf-pos) frm #t)
-      (values db frm #f)))
+  ;; window.rkt handles all coordinate math and focus switching.
+  (values db frm
+          (frame-point-to-xy! frm (key-mouse-x ke) (key-mouse-y ke))))
 
 (define (handle-mouse-scroll! db frm ke)
   ;; Scroll the leaf under the mouse cursor.
-  ;; Scroll amount: 3 lines per wheel tick.
+  ;; Returns (values db frm acted?).
   (define lf (frame-xy->leaf frm (key-mouse-x ke) (key-mouse-y ke)))
-  (unless lf (values db frm #f))
-  (define buf (leaf-buffer lf))
-  (define gb  (text-gap (buffer-text buf)))
-  (define ws  (marker-pos (leaf-start lf)))
-  (define dir (key-mouse-button ke))  ;; 'wheel-up or 'wheel-down
-  (define lines 3)
-  (define (nl? b) (= b #x0A))
-  (define new-start
-    (if (eq? dir 'wheel-up)
-        ;; Scroll up: move start backward N lines
-        (let loop ([p ws] [n lines])
-          (if (or (<= p 0) (zero? n))
-              p
-              (let ([nl (gap-scan-byte gb (max 0 (sub1 p)) 'backward nl?)])
-                (if (< nl 0) 0 (loop nl (sub1 n))))))
-        ;; Scroll down: move start forward N lines
-        (let loop ([p ws] [n lines])
-          (if (or (>= p (gap-length gb)) (zero? n))
-              p
-              (let ([nl (gap-scan-byte gb p 'forward nl?)])
-                (if (>= nl (gap-length gb))
-                    (gap-length gb)
-                    (loop (add1 nl) (sub1 n))))))))
-  (when (not (= new-start ws))
-    (apply-scroll! lf new-start (leaf-hscroll lf)))
-  (values db frm #t))
+  (if lf
+      (let* ()
+        (define buf (leaf-buffer lf))
+        (define gb  (text-gap (buffer-text buf)))
+        (define ws  (marker-pos (leaf-start lf)))
+        (define dir (key-mouse-button ke))
+        (define lines 3)
+        (define (newline-byte? b) (= b #x0A))
+        (define new-start
+          (if (eq? dir 'wheel-up)
+              (let loop ([p ws] [n lines])
+                (if (or (<= p 0) (zero? n))
+                    p
+                    (let ([nl (gap-scan-byte gb (max 0 (sub1 p)) 'backward newline-byte?)])
+                      (if (< nl 0) 0 (loop nl (sub1 n))))))
+              (let loop ([p ws] [n lines])
+                (if (or (>= p (gap-length gb)) (zero? n))
+                    p
+                    (let ([nl (gap-scan-byte gb p 'forward newline-byte?)])
+                      (if (>= nl (gap-length gb))
+                          (gap-length gb)
+                          (loop (add1 nl) (sub1 n))))))))
+        (when (not (= new-start ws))
+          (apply-scroll! lf new-start (leaf-hscroll lf)))
+        (values db frm #t))
+      (values db frm #t)))
 
 ;; ============================================================
 ;; ============================================================
@@ -327,6 +316,7 @@
   (detect-terminal-size!)
   (format-alt-screen-enable)
   (display format-bracketed-paste-enable)
+  (display format-mouse-enable)
   (display format-clear-screen)
   (flush-output)
 

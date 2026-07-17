@@ -135,7 +135,7 @@
   ;; params is the list of integers, first param is the button code
   (and (pair? params) (>= (car params) 0)))
 
-;; Returns: (values 'mouse button x y action modifiers)
+;; Returns: key-mouse?
 ;; Called from the mouse detection path in read-key
 
 (define (decode-sgr-mouse params final)
@@ -161,7 +161,7 @@
           [move?    'move]
           [else     'press]))
 
-  (values 'mouse button x y action mods))
+  (key-mouse button x y action mods))
 
 ;; ============================================================
 ;; SS3

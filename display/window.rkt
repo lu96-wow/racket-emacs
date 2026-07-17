@@ -52,6 +52,7 @@
  ;; ── screen → buffer: terminal (x,y) → (leaf, buffer-pos) ──
  frame-xy->leaf      ;; frame × x × y → (or/c leaf? #f)  (x,y: 1-based SGR)
  leaf-xy->buffer-pos ;; leaf × x × y × rect → (or/c byte-pos? #f)  (x,y: 0-based local)
+ frame-point-to-xy!  ;; frame × x × y → boolean?  moves point, switches focus
 
  ;; ── scroll (pure result → apply to leaf markers) ──
  apply-scroll!
@@ -275,6 +276,26 @@
                #:left-col  hs))
 
   (layout-query-pos gb ly local-y local-x))
+
+(define (frame-point-to-xy! frm x y)
+  ;; Move point in frm to the buffer position at terminal (x,y).
+  ;; x, y : exact-positive-integer? — 1-based SGR coordinates.
+  ;; Returns boolean? — #t if point was moved, #f if click was outside all leaves.
+  ;; Mutations: may switch focus, moves buffer point.
+  (define lf (frame-xy->leaf frm x y))
+  (and lf
+       (let* (;; Switch focus if needed
+              [_ (when (not (eq? lf (frame-selected frm)))
+                   (frame-select! frm lf))]
+              ;; Convert through geometry → layout → buffer position
+              [geo     (leaf-geometry frm lf)]
+              [local-x (and geo (- (sub1 x) (rect-left geo)))]
+              [local-y (and geo (- (sub1 y) (rect-top geo)))]
+              [buf-pos (and geo (leaf-xy->buffer-pos lf geo local-x local-y))])
+         (and buf-pos
+              (begin
+                (set-buffer-point! (leaf-buffer lf) buf-pos)
+                #t)))))
 
 ;; ============================================================
 ;; Mutations: tree structure
