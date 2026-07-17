@@ -10,7 +10,7 @@
 ;; Dependencies: display/vbuffer (for blit target), zero kernel deps.
 
 (require "vbuffer.rkt"
-         "char-width.rkt")
+         "../kernel/data/char-width.rkt")
 
 (provide
  ;; glyph — pre-resolved display element

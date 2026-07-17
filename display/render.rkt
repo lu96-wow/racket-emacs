@@ -6,7 +6,7 @@
 ;; from text properties, fills a vbuffer.  No terminal output, no ANSI.
 ;;
 ;; Dependencies: kernel/data (gap+query), kernel/buffer (textprop),
-;;   display/vbuffer, display/layout, display/face, display/char-width
+;;   display/vbuffer, display/layout, display/face, kernel/data/char-width
 
 (require "../kernel/data/gap.rkt"
          "../kernel/data/query.rkt"
@@ -14,7 +14,7 @@
          "vbuffer.rkt"
          "layout.rkt"
          "face.rkt"
-         "char-width.rkt"
+         "../kernel/data/char-width.rkt"
          "row-cache.rkt")
 
 (provide

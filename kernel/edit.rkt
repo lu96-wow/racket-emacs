@@ -17,7 +17,7 @@
          "data/query.rkt"
          "kill-ring.rkt"
          "undo/recorder.rkt"
-         "../display/char-width.rkt")
+         "data/char-width.rkt")
 
 (provide
  ;; content-modifying

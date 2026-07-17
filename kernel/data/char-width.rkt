@@ -1,14 +1,14 @@
 #lang racket
 
-;; display/char-width.rkt — Character display width calculation
+;; kernel/data/char-width.rkt — Character display width calculation
 ;;
 ;; Pure functions.  Classifies each codepoint into 0, 1, or 2 display
 ;; columns.  Used by layout.rkt to compute screen positions.
 ;;
 ;; Dependencies: kernel/data/gap.rkt, kernel/data/query.rkt (pure queries only)
 
-(require "../kernel/data/gap.rkt"
-         "../kernel/data/query.rkt")
+(require "gap.rkt"
+         "query.rkt")
 
 (provide
  char-display-width

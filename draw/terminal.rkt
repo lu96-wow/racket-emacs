@@ -11,7 +11,7 @@
 
 (require "../display/vbuffer.rkt"
          "../display/face.rkt"
-         "../display/char-width.rkt"
+         "../kernel/data/char-width.rkt"
          "../platform/ansi.rkt")
 
 (provide

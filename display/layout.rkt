@@ -8,11 +8,11 @@
 ;;
 ;; Consumed by render.rkt to fill a vbuffer.
 ;;
-;; Dependencies: kernel/data/gap, kernel/data/query, display/char-width
+;; Dependencies: kernel/data/gap, kernel/data/query, kernel/data/char-width
 
 (require "../kernel/data/gap.rkt"
          "../kernel/data/query.rkt"
-         "char-width.rkt")
+         "../kernel/data/char-width.rkt")
 
 (provide
  ;; layout

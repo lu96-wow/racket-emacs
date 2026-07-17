@@ -48,7 +48,7 @@
          "display/render.rkt"
          "display/face.rkt"
          "display/window.rkt"
-         "display/char-width.rkt"
+         "kernel/data/char-width.rkt"
          "display/row-cache.rkt"
          "draw/terminal.rkt"
          "platform/ansi.rkt"
