@@ -32,6 +32,9 @@
  ;; position queries
  layout-query-pos      ;; gb layout row col → (or/c #f byte-pos)
  pos->row-col          ;; gb start target → (values row col)
+
+ ;; scroll calculation (pure — no side effects)
+ calc-scroll           ;; gb pt-pos start rows cols hscroll wrap → (values new-start new-hscroll)
  )
 
 ;; ============================================================
@@ -186,6 +189,87 @@
                       [else (loop (add1 row) (add1 nl))])])))
 
 ;; ============================================================
+;; Scroll calculation — keep point visible in viewport
+;; ============================================================
+
+(define (calc-scroll gb pt-pos start-pos max-rows max-cols
+                     hscroll wrap-mode)
+  ;; Pure: determines the scroll position that brings pt-pos into view.
+  ;; Returns (values new-start new-hscroll) — both are byte-pos and
+  ;; column respectively.  The caller applies them to leaf markers.
+  (define len (gap-length gb))
+
+  ;; 1. Calculate the last visible buffer position
+  (define last-visible-pos
+    (if (eq? wrap-mode 'none)
+        (end-of-physical-lines gb start-pos max-rows)
+        (let ([vlines (visual-line-lines gb start-pos max-rows max-cols
+                                         #:wrap-mode 'char)])
+          (if (null? vlines)
+              start-pos
+              (visual-line-end-buf-pos (last vlines))))))
+
+  ;; 2. Vertical: is point before the visible region?
+  (define new-start
+    (cond [(< pt-pos start-pos)
+           ;; Point is above — scroll up so point is on first line
+           (let ([nl (gap-scan-byte gb pt-pos 'backward (λ (b) (= b #x0A)))])
+             (if (>= nl 0) (add1 nl) 0))]
+          [(>= pt-pos last-visible-pos)
+           ;; Point is below — scroll down so point is 1/3 from bottom
+           (define target-lines (max 1 (quotient (* max-rows 2) 3)))
+           (beginning-of-nth-prev-line gb pt-pos target-lines)]
+          [else
+           ;; Point is visible — keep current scroll
+           #f]))
+
+  ;; 3. Horizontal: is point's column off-screen? (truncate only)
+  (define new-hscroll
+    (if (eq? wrap-mode 'none)
+        (let* ([bol (gap-scan-byte gb pt-pos 'backward (λ (b) (= b #x0A)))]
+               [line-start (if (>= bol 0) (add1 bol) 0)]
+               [pt-col (gap-display-width gb line-start pt-pos)])
+          (cond [(< pt-col hscroll)
+                 ;; Point left of visible area
+                 pt-col]
+                [(>= pt-col (+ hscroll max-cols))
+                 ;; Point right of visible area
+                 (max 0 (- pt-col max-cols -1))]
+                [else #f]))
+        #f))  ; no hscroll in wrap mode
+
+  (values (or new-start start-pos) (or new-hscroll hscroll)))
+
+;; ============================================================
+;; Scroll helpers (internal)
+;; ============================================================
+
+(define (end-of-physical-lines gb start n)
+  ;; Return the byte-pos after advancing past N newlines from start.
+  (define len (gap-length gb))
+  (define (nl? b) (= b #x0A))
+  (let loop ([pos start] [remaining n])
+    (if (or (zero? remaining) (>= pos len))
+        pos
+        (let ([nl (gap-scan-byte gb pos 'forward nl?)])
+          (if (>= nl len)
+              len
+              (loop (add1 nl) (sub1 remaining)))))))
+
+(define (beginning-of-nth-prev-line gb pos n)
+  ;; Return the byte-pos of the start of the Nth previous line.
+  (define (nl? b) (= b #x0A))
+  (let loop ([p pos] [remaining n])
+    (if (<= p 0)
+        0
+        (let ([nl (gap-scan-byte gb (max 0 (sub1 p)) 'backward nl?)])
+          (if (< nl 0)
+              0
+              (if (zero? remaining)
+                  (add1 nl)
+                  (loop nl (sub1 remaining))))))))
+
+;; ============================================================
 ;; Tests
 ;; ============================================================
 
@@ -241,4 +325,37 @@
         (check-equal? r 0) (check-equal? c 0))
       (let-values ([(r c) (pos->row-col gb start 4)])
         (check-equal? r 1) (check-equal? c 1))))
+
+  (test-case "calc-scroll — point visible, no scroll"
+    (let* ([gb (make-gb "line1\nline2\nline3\nline4\nline5\n")])
+      (let-values ([(s h) (calc-scroll gb 0 0 3 80 0 'none)])
+        ;; Point at 0, start at 0, 3-row viewport → point IS visible
+        (check-equal? s 0)
+        (check-equal? h 0))))
+
+  (test-case "calc-scroll — point below viewport (scroll forward)"
+    (let* ([gb (make-gb "a\nb\nc\nd\ne\nf\ng\nh\n")])
+      ;; Point at byte 14 (after "g\n"), start at 0, 3 rows
+      ;; Lines: a b c visible, point at g → scroll
+      (let-values ([(s h) (calc-scroll gb 14 0 3 80 0 'none)])
+        (check-true (> s 0) "should scroll forward"))))
+
+  (test-case "calc-scroll — point above viewport (scroll backward)"
+    (let* ([gb (make-gb "a\nb\nc\nd\ne\n")])
+      ;; start at byte 6 (d\n), point at byte 2 (b\n) → scroll back
+      (let-values ([(s h) (calc-scroll gb 2 6 3 80 0 'none)])
+        (check-true (< s 6) "should scroll backward")
+        (check-true (<= s 2) "point should be visible after scroll"))))
+
+  (test-case "calc-scroll — horizontal scroll"
+    (let* ([gb (make-gb "abcdefghijklmnopqrstuvwxyz")])
+      ;; 26 chars, viewport 10 cols, hscroll=0, point at 25
+      (let-values ([(s h) (calc-scroll gb 25 0 1 10 0 'none)])
+        (check-equal? s 0 "no vertical scroll")
+        (check-true (> h 0) "should hscroll right")))
+    (let* ([gb (make-gb "abcdefghijklmnopqrstuvwxyz")])
+      ;; hscroll=20, point at 3 (left of view) → scroll left
+      (let-values ([(s h) (calc-scroll gb 3 0 1 10 20 'none)])
+        (check-equal? s 0)
+        (check-true (< h 20) "should hscroll left"))))
 )

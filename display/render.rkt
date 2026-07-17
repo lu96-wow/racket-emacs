@@ -14,11 +14,17 @@
          "vbuffer.rkt"
          "layout.rkt"
          "face.rkt"
-         "char-width.rkt")
+         "char-width.rkt"
+         "row-cache.rkt")
 
 (provide
+ ;; without cache (always full render)
  render-layout!
- render-layout/region!)
+ render-layout/region!
+
+ ;; with row-cache (incremental where possible)
+ render-layout/cached!
+ render-layout/region/cached!)
 
 ;; ============================================================
 ;; render-layout! — fill vbuffer from a layout
@@ -34,7 +40,9 @@
   (for ([vl  (in-list (layout-lines ly))]
         [row (in-naturals)]
         #:when (< row rows))
-    (render-visual-line! vb row 0 vl gb text-props face-cache #f #f))
+    (define-values (_vb _glyphs)
+      (render-visual-line! vb row 0 vl gb text-props face-cache #f #f))
+    (void))
 
   vb)
 
@@ -51,9 +59,73 @@
   (for ([vl  (in-list (layout-lines ly))]
         [row (in-naturals)]
         #:when (< row rows))
-    (render-visual-line! vb row 0 vl gb text-props face-cache
-                         region-beg region-end))
+    (define-values (_vb _glyphs)
+      (render-visual-line! vb row 0 vl gb text-props face-cache
+                           region-beg region-end))
+    (void))
 
+  vb)
+
+;; ============================================================
+;; render-layout/cached! — incremental render with row-cache
+;; ============================================================
+
+(define (render-layout/cached! ly gb text-props face-cache row-cache)
+  ;; Like render-layout! but uses row-cache for incremental redisplay.
+  ;; On cache hit ('exact), skips face resolution and blits directly.
+  ;; Returns vb; row-cache is mutated in-place.
+  (define rows (layout-max-rows ly))
+  (define cols (layout-max-cols ly))
+  (define vb  (make-vbuffer rows cols))
+
+  (define vlines (layout-lines ly))
+  (for ([vl  (in-list vlines)]
+        [row (in-naturals)]
+        #:when (< row rows))
+    (define buf-start (visual-line-buf-pos vl))
+    (define buf-end   (visual-line-end-buf-pos vl))
+    (match (row-cache-compare row-cache row buf-start buf-end)
+      ['exact
+       (row-cache-blit-row! vb row row-cache row)]
+      [_  ;; 'shifted or 'stale — full render + update cache
+       (define-values (_vb _glyphs) (render-visual-line! vb row 0 vl gb text-props
+                                                          face-cache #f #f))
+       (row-cache-update! row-cache row buf-start buf-end _glyphs
+                          (visual-line-continued? vl)
+                          (visual-line-truncated? vl))]))
+
+  ;; Clear stale cache rows beyond current layout
+  (row-cache-clear-from! row-cache (length vlines))
+  vb)
+
+;; ============================================================
+;; render-layout/region/cached! — with region + row-cache
+;; ============================================================
+
+(define (render-layout/region/cached! ly gb text-props face-cache
+                                       region-beg region-end row-cache)
+  (define rows (layout-max-rows ly))
+  (define cols (layout-max-cols ly))
+  (define vb  (make-vbuffer rows cols))
+
+  (define vlines (layout-lines ly))
+  (for ([vl  (in-list vlines)]
+        [row (in-naturals)]
+        #:when (< row rows))
+    (define buf-start (visual-line-buf-pos vl))
+    (define buf-end   (visual-line-end-buf-pos vl))
+    (match (row-cache-compare row-cache row buf-start buf-end)
+      ['exact
+       (row-cache-blit-row! vb row row-cache row)]
+      [_
+       (define-values (_vb _glyphs) (render-visual-line! vb row 0 vl gb text-props
+                                                          face-cache
+                                                          region-beg region-end))
+       (row-cache-update! row-cache row buf-start buf-end _glyphs
+                          (visual-line-continued? vl)
+                          (visual-line-truncated? vl))]))
+
+  (row-cache-clear-from! row-cache (length vlines))
   vb)
 
 ;; ============================================================
@@ -62,6 +134,8 @@
 
 (define (render-visual-line! vb row start-col vl gb text-props
                              face-cache region-beg region-end)
+  ;; Fill one vbuffer row from a visual-line.
+  ;; Returns (values vb glyphs) where glyphs is (vectorof glyph?) for caching.
   (define content     (visual-line-content vl))
   (define buf-pos     (visual-line-buf-pos vl))
   (define truncated?  (visual-line-truncated? vl))
@@ -69,6 +143,9 @@
 
   ;; Face-id for base text (from text-properties) + region overlay
   (define face-cache-map (make-hash))  ; (base-face . overlay) → face-id
+
+  ;; Collect glyphs for row-cache (reversed, then reversed at end)
+  (define glyphs-rev '())
 
   (let loop ([col      start-col]
              [char-idx 0]
@@ -98,6 +175,7 @@
              (let fill-tab ([c col] [n tab-w])
                (when (and (< c max-cols) (> n 0))
                  (vbuffer-put-char! vb row c #\space #:face-id fid)
+                 (set! glyphs-rev (cons (glyph #\space 1 fid) glyphs-rev))
                  (fill-tab (add1 c) (sub1 n))))
              (loop (+ col tab-w)
                    (add1 char-idx)
@@ -106,11 +184,14 @@
             ;; Control characters → ^X representation
             [(< (char->integer ch) 32)
              (when (< col max-cols)
-               (vbuffer-put-char! vb row col #\^ #:face-id fid))
+               (vbuffer-put-char! vb row col #\^ #:face-id fid)
+               (set! glyphs-rev (cons (glyph #\^ 1 fid) glyphs-rev)))
              (when (< (add1 col) max-cols)
                (vbuffer-put-char! vb row (add1 col)
                                   (integer->char (+ 64 (char->integer ch)))
-                                  #:face-id fid))
+                                  #:face-id fid)
+               (set! glyphs-rev (cons (glyph (integer->char (+ 64 (char->integer ch)))
+                                             1 fid) glyphs-rev)))
              (loop (+ col 2)
                    (add1 char-idx)
                    (gap-next-char-pos gb byte-pos))]
@@ -118,9 +199,11 @@
             ;; DEL character
             [(char=? ch #\rubout)
              (when (< col max-cols)
-               (vbuffer-put-char! vb row col #\^ #:face-id fid))
+               (vbuffer-put-char! vb row col #\^ #:face-id fid)
+               (set! glyphs-rev (cons (glyph #\^ 1 fid) glyphs-rev)))
              (when (< (add1 col) max-cols)
-               (vbuffer-put-char! vb row (add1 col) #\? #:face-id fid))
+               (vbuffer-put-char! vb row (add1 col) #\? #:face-id fid)
+               (set! glyphs-rev (cons (glyph #\? 1 fid) glyphs-rev)))
              (loop (+ col 2)
                    (add1 char-idx)
                    (gap-next-char-pos gb byte-pos))]
@@ -129,6 +212,7 @@
             [else
              (when (< col max-cols)
                (vbuffer-put-char! vb row col ch #:face-id fid))
+             (set! glyphs-rev (cons (glyph ch cw fid) glyphs-rev))
              ;; Skip next column for wide chars (display-width=2)
              (loop (+ col (if (= cw 2) 2 1))
                    (add1 char-idx)
@@ -138,7 +222,7 @@
   (when (and truncated? (> max-cols 0))
     (vbuffer-put-char! vb row (sub1 max-cols) #\$))
 
-  vb)
+  (values vb (list->vector (reverse glyphs-rev))))
 
 ;; ============================================================
 ;; Tests
@@ -209,5 +293,46 @@
              [ly (compute-layout gb 0 #:max-rows 3 #:max-cols 10)])
         (define vb (render-layout! ly gb tp fc))
         ;; Last column should be '$'
-        (check-equal? (cell-ch (vector-ref (vbuffer-cells vb) 9)) #\$))))
+        (check-equal? (cell-ch (vector-ref (vbuffer-cells vb) 9)) #\$)))
+
+    (test-case "render-layout/cached! — first render fills cache"
+      (let* ([gb (make-gb "hello")]
+             [tp (make-tp)]
+             [fc (current-face-cache)]
+             [ly (compute-layout gb 0 #:max-rows 3 #:max-cols 10)]
+             [rc (make-row-cache 10)])
+        (define vb (render-layout/cached! ly gb tp fc rc))
+        (check-equal? (vbuffer-row->string vb 0) "hello     ")
+        ;; Row 0 should be cached
+        (check-true (row-cache-valid-row? rc 0))
+        ;; Row 1 should be cleared (no content)
+        (check-false (row-cache-valid-row? rc 1))))
+
+    (test-case "render-layout/cached! — cache hit"
+      (let* ([gb (make-gb "hello")]
+             [tp (make-tp)]
+             [fc (current-face-cache)]
+             [ly (compute-layout gb 0 #:max-rows 3 #:max-cols 10)]
+             [rc (make-row-cache 10)])
+        ;; First render
+        (render-layout/cached! ly gb tp fc rc)
+        ;; Second render with same layout — should hit cache
+        (define vb2 (render-layout/cached! ly gb tp fc rc))
+        (check-equal? (vbuffer-row->string vb2 0) "hello     ")
+        (check-true (row-cache-valid-row? rc 0))))
+
+    (test-case "render-layout/cached! — cache miss after change"
+      (let* ([gb (make-gb "hello")]
+             [tp (make-tp)]
+             [fc (current-face-cache)]
+             [ly1 (compute-layout gb 0 #:max-rows 3 #:max-cols 10)]
+             [rc (make-row-cache 10)])
+        ;; First render
+        (render-layout/cached! ly1 gb tp fc rc)
+        (check-true (row-cache-valid-row? rc 0))
+        ;; Simulate buffer change: re-layout with different start
+        (define ly2 (compute-layout gb 2 #:max-rows 3 #:max-cols 10))
+        (define vb2 (render-layout/cached! ly2 gb tp fc rc))
+        ;; Row 0 of new layout starts at byte 2, old cache starts at 0 → stale
+        (check-equal? (vbuffer-row->string vb2 0) "llo       "))))
 )

@@ -48,6 +48,9 @@
  layout-calc
  focus-list next-leaf prev-leaf leaf-geometry leaf-at-xy leaf-count
 
+ ;; ── scroll (pure result → apply to leaf markers) ──
+ apply-scroll!
+
  ;; ── apply (side effects on frame) ──
  layout-frame! init-frame
  frame-split-leaf! frame-delete-leaf! frame-delete-other-leaves!
@@ -309,6 +312,19 @@
   (set-frame-w! frm w)
   (set-frame-h! frm h)
   (layout-frame! frm))
+
+;; ============================================================
+;; apply-scroll! — write scroll result to leaf markers
+;; ============================================================
+
+(define (apply-scroll! lf new-start new-hscroll)
+  ;; Pure composition: take leaf + calc-scroll result → update markers.
+  ;; Returns the leaf (mutated in place).
+  (define buf (leaf-buffer lf))
+  (define tx  (buffer-text buf))
+  (text-set-marker-pos! tx (leaf-start lf) new-start)
+  (set-leaf-hscroll! lf new-hscroll)
+  lf)
 
 ;; ============================================================
 ;; leaf-set-buffer! — change what buffer a leaf views
