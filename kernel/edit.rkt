@@ -16,7 +16,8 @@
          "data/text.rkt"
          "data/query.rkt"
          "kill-ring.rkt"
-         "undo/recorder.rkt")
+         "undo/recorder.rkt"
+         "../display/char-width.rkt")
 
 (provide
  ;; content-modifying
@@ -37,6 +38,7 @@
 
  ;; line helpers (pure)
  line-beginning line-end
+ display-column move-to-column
 
  ;; mark / region
  cmd-set-mark cmd-swap-point-and-mark
@@ -187,12 +189,22 @@
             (loop (gap-prev-char-pos gb p))))))
 
 (define (line-end gb pt len)
-  ;; Return byte-position of the last character on the line containing pt
-  ;; (the newline or buffer-end).
+  ;; Return byte-position of the newline ending the line containing pt
+  ;; (or buffer-end if last line).
   (let loop ([p pt])
     (cond [(>= p len) len]
           [(char=? (gap-char gb p) #\newline) p]
           [else (loop (gap-next-char-pos gb p))])))
+
+(define (display-column gb pt)
+  ;; Visual column (0-based) of pt within its line.
+  (gap-display-width gb (line-beginning gb pt) pt))
+
+(define (move-to-column gb bol target-col len)
+  ;; Return byte-pos at or before target-col on line starting at bol.
+  ;; Clamped to line-end if the line is shorter than target-col.
+  (define eol (line-end gb bol len))
+  (scan-display-width gb bol eol target-col))
 
 ;; ============================================================
 ;; Cursor movement — simple
@@ -218,27 +230,36 @@
         (dirty-set-point! db eol))))
 
 (define (cmd-next-line db)
+  ;; Move to next line, preserving visual column.
+  ;; On short lines clamps to end-of-line.
   (define buf (dirty-buffer-buf db))
   (define gb  (text-gap (buffer-text buf)))
   (define pt  (dirty-point db))
   (define len (dirty-length db))
-  (define nl  (gap-scan-byte gb pt 'forward (lambda (b) (= b #x0A))))
-  (dirty-set-point! db (if (>= nl len) len (add1 nl))))
+  (define goal-col (display-column gb pt))
+  (define eol (line-end gb pt len))
+  (when (< eol len)
+    (define next-bol (gap-next-char-pos gb eol))
+    (dirty-set-point! db (move-to-column gb next-bol goal-col len)))
+  db)
 
 (define (cmd-prev-line db)
-  ;; Original algorithm: find BOL, step one char back (the \n),
-  ;; then line-beginning from there → previous line's BOL.
+  ;; Move to previous line, preserving visual column.
+  ;; On short lines clamps to end-of-line.
   (define buf (dirty-buffer-buf db))
   (define gb  (text-gap (buffer-text buf)))
   (define pt  (dirty-point db))
   (if (zero? pt)
       db
-      (let* ([bol (line-beginning gb pt)])
+      (let* ([bol       (line-beginning gb pt)]
+             [len       (dirty-length db)]
+             [goal-col  (display-column gb pt)])
         (if (zero? bol)
             (dirty-set-point! db 0)
             (let* ([prev-end (gap-prev-char-pos gb bol)]
                    [prev-bol (line-beginning gb prev-end)])
-              (dirty-set-point! db prev-bol))))))
+              (dirty-set-point! db (move-to-column gb prev-bol goal-col len))))
+        db)))
 
 ;; ============================================================
 ;; Mark / Region
