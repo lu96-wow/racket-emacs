@@ -59,7 +59,7 @@
  layout-frame! init-frame
  frame-split-leaf! frame-delete-leaf! frame-delete-other-leaves!
  frame-select! frame-select-next! frame-select-prev!
- frame-resize!
+ frame-resize! frame-resize
  leaf-set-buffer!)
 
 ;; ============================================================
@@ -340,13 +340,19 @@
   (frame-select! frm (prev-leaf frm)))
 
 ;; ============================================================
-;; frame-resize! — update dimensions + relayout
+;; frame-resize! — update dimensions + relayout (in-place)
 ;; ============================================================
 
 (define (frame-resize! frm w h)
   (set-frame-w! frm w)
   (set-frame-h! frm h)
   (layout-frame! frm))
+
+;; frame-resize — pure, returns new frame (triggers cache invalidation)
+(define (frame-resize frm w h)
+  (define new-frm (struct-copy frame frm [w w] [h h]))
+  (layout-frame! new-frm)
+  new-frm)
 
 ;; ============================================================
 ;; apply-scroll! — write scroll result to leaf markers
