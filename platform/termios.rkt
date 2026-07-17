@@ -130,14 +130,14 @@
 (define (start-resize-monitor!)
   (thread
     (λ ()
-      (let loop ([prev-w (terminal-width)] [prev-h (terminal-height)])
-        (sleep RESIZE-POLL-INTERVAL)
-        (detect-terminal-size!)
-        (define w (terminal-width))
-        (define h (terminal-height))
-        (unless (and (= w prev-w) (= h prev-h))
-          (channel-put resize-channel 'resize))
-        (loop w h)))))
+      (let-values ([(w h) (get-window-size)])
+        (let loop ([prev-w (or w 80)] [prev-h (or h 24)])
+          (sleep RESIZE-POLL-INTERVAL)
+          (let-values ([(w h) (get-window-size)])
+            (cond [(and w h (or (not (= w prev-w)) (not (= h prev-h))))
+                   (channel-put resize-channel 'resize)
+                   (loop w h)]
+                  [else (loop prev-w prev-h)])))))))
 
 ;; ============================================================
 ;; Public entry points

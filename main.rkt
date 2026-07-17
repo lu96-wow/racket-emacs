@@ -278,16 +278,17 @@
           [(key-idle? ke)  (loop db frm cache leaf-caches ebuf)]
           [(key-quit? ke)  (void)]
           [(and (key-sym? ke) (eq? (key-sym-name ke) 'resize))
-           ;; Terminal resize: rebuild frame with new size, clear caches, re-render
-           (define new-frm (make-frame (editor-buffer-buf ebuf)
-                                       (terminal-width) (terminal-height)))
+           ;; Terminal resize: update size (in main thread), re-layout frame,
+           ;; clear caches, re-render.  frame-resize! preserves all leaves.
+           (detect-terminal-size!)
+           (frame-resize! frm (terminal-width) (terminal-height))
            (invalidate-leaf-caches! leaf-caches)
            (define new-cache
              (with-handlers ([exn:fail? (λ (e)
                              (eprintf "Render error: ~a\n" (exn-message e))
                              cache)])
-               (render-and-flush db new-frm cache fc leaf-caches)))
-           (loop db new-frm new-cache leaf-caches ebuf)]
+               (render-and-flush db frm cache fc leaf-caches)))
+           (loop db frm new-cache leaf-caches ebuf)]
           [else
            ;; Resolve keymap: local (from ebuf) or fallback to global
            (define km (keymap-resolve (editor-buffer-local-keymap ebuf) global-keymap))
