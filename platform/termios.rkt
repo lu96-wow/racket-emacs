@@ -10,7 +10,9 @@
  screen-init! screen-cleanup!
  terminal-width terminal-height get-window-size
  detect-terminal-size!
- terminal? STDIN_FILENO)
+ terminal? STDIN_FILENO
+ ;; resize event (green thread polls ioctl, writes channel)
+ resize-channel)
 
 (define libc (ffi-lib #f))
 (define tcgetattr (get-ffi-obj 'tcgetattr libc (_fun _int _pointer -> _int)))
@@ -117,12 +119,34 @@
   (when cols (terminal-width cols)))
 
 ;; ============================================================
+;; Resize monitor — green thread polls TIOCGWINSZ every 0.1s.
+;; On change: detect-terminal-size! + channel-put.
+;; read-key sync multiplexes stdin + resize-channel together.
+;; ============================================================
+
+(define RESIZE-POLL-INTERVAL 0.1)
+(define resize-channel (make-channel))
+
+(define (start-resize-monitor!)
+  (thread
+    (λ ()
+      (let loop ([prev-w (terminal-width)] [prev-h (terminal-height)])
+        (sleep RESIZE-POLL-INTERVAL)
+        (detect-terminal-size!)
+        (define w (terminal-width))
+        (define h (terminal-height))
+        (unless (and (= w prev-w) (= h prev-h))
+          (channel-put resize-channel 'resize))
+        (loop w h)))))
+
+;; ============================================================
 ;; Public entry points
 ;; ============================================================
 
 (define (screen-init!)
   (unless (terminal?) (error 'screen-init! "stdin is not a TTY"))
-  (enter-raw-mode!) (detect-terminal-size!))
+  (enter-raw-mode!) (detect-terminal-size!)
+  (start-resize-monitor!))
 
 (define (screen-cleanup!)
   (display "\e[?25h") (display "\e[0m")

@@ -45,12 +45,18 @@
 (define (make-stdin-evt) (read-bytes-evt 1 (current-input-port)))
 
 (define (read-byte)
-  (define evt (sync (make-stdin-evt)))
-  (and (bytes? evt) (bytes-ref evt 0)))
+  ;; sync on both stdin and resize channel
+  (define evt (sync (make-stdin-evt) resize-channel))
+  (if (eq? evt 'resize)
+      'resize
+      (and (bytes? evt) (bytes-ref evt 0))))
 
 (define (read-byte/timeout sec)
-  (define evt (sync/timeout sec (make-stdin-evt)))
-  (and (bytes? evt) (= (bytes-length evt) 1) (bytes-ref evt 0)))
+  (define evt (sync/timeout sec (make-stdin-evt) resize-channel))
+  (cond
+    [(eq? evt 'resize) 'resize]
+    [(bytes? evt) (and (= (bytes-length evt) 1) (bytes-ref evt 0))]
+    [else #f]))
 
 (define (read-bytes-n/timeout n sec)
   (let loop ([i 0] [acc (bytes)])
@@ -81,7 +87,7 @@
 (define (read-csi-seq b2)
   (let loop ([acc (list ESC b2)])
     (define b (read-byte/timeout ESCDELAY))
-    (cond [(not b) (list->bytes acc)]
+    (cond [(or (eq? b 'resize) (not b)) (list->bytes acc)]
           [(csi-final? b) (list->bytes (append acc (list b)))]
           [else (loop (append acc (list b)))])))
 
@@ -178,6 +184,7 @@
 (define (read-key)
   (define b (read-byte))
   (cond
+    [(eq? b 'resize) (key-sym 'resize)]
     [(not b) (key-sym 'idle)]
 
     ;; ESC — could be bare, CSI, SS3, or mouse
