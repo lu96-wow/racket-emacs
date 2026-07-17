@@ -10,11 +10,13 @@
 ;;         │
 ;;   dirty-buffer  ←─  kernel/edit.rkt commands
 ;;         │
+;;   fontify-changed!  ←─  lang/font-lock (syntax + keywords → text-props)
+;;         │
 ;;   calc-scroll → apply-scroll!  (point visible? → adjust leaf markers)
 ;;         │
 ;;   compute-layout  ←─  buffer gap + point + frame geometry
 ;;         │
-;;   render-layout/cached!  ←─  layout + text-props + row-cache  →  vbuffer
+;;   render-layout/cached!  ←─  layout + text-props (faces!) + row-cache  →  vbuffer
 ;;         │
 ;;   terminal-flush-delta!  ←─  vbuffer + cache  →  ANSI to stdout
 ;;
@@ -36,7 +38,11 @@
          "kernel/data/marker.rkt"
          "kernel/data/gap.rkt"
          "kernel/dirty.rkt"
-         "kernel/edit.rkt")
+         "kernel/edit.rkt"
+         "lang/apply.rkt"
+         "lang/racket-lang.rkt"
+         "lang/scheme-lang.rkt"
+         "lang/python-lang.rkt")
 
 ;; ============================================================
 ;; Initial buffer content
@@ -310,12 +316,20 @@
 ;; Main event loop
 ;; ============================================================
 
+;; ============================================================
+;; Language setup — populate the registry once
+;; ============================================================
+
+(set-box! available-languages
+  (list racket-lang-def scheme-lang-def python-lang-def))
+
+;; ============================================================
+;; Main event loop
+;; ============================================================
+
 (define (run)
-  ;; Enter raw terminal mode
   (screen-init!)
   (detect-terminal-size!)
-
-  ;; Clear screen, enable alt screen buffer
   (format-alt-screen-enable)
   (display format-bracketed-paste-enable)
   (display format-clear-screen)
@@ -329,13 +343,15 @@
       (define db  (make-dirty-buffer buf))
       (init-face-cache!)
       (define fc  (current-face-cache))
-      (define frm (make-frame buf (terminal-width) (terminal-height)))
-      (define leaf-caches (make-hasheq))  ; leaf → row-cache
 
-      ;; Start point at end of initial content so user sees content
+      ;; Match language → activate faces → fontify entire buffer
+      (fontify-setup! buf)
+
+      (define frm (make-frame buf (terminal-width) (terminal-height)))
+      (define leaf-caches (make-hasheq))
       (set-buffer-point! buf (buffer-length buf))
 
-      ;; Show initial content immediately (render before first key)
+      ;; Initial render
       (define cache
         (with-handlers ([exn:fail? (λ (e)
                         (eprintf "Render error: ~a\n" (exn-message e)) #f)])
@@ -344,33 +360,20 @@
       ;; --- Event loop ---
       (let loop ([db db] [frm frm] [cache cache] [leaf-caches leaf-caches])
         (define key (read-key))
-
         (cond
-          ;; Idle — no input, just loop (no re-render)
-          [(equal? key '(idle))
-           (loop db frm cache leaf-caches)]
-
-          ;; Quit
-          [(equal? key '(quit))
-           (void)]
-
-          ;; Dispatch + commit + render
+          [(equal? key '(idle))  (loop db frm cache leaf-caches)]
+          [(equal? key '(quit))  (void)]
           [else
            (define-values (new-db new-frm acted?)
              (dispatch db key frm))
-
            (define db2 (if acted? (dirty-commit! new-db) new-db))
-
-           ;; After split or frame change, re-layout + invalidate caches
            (when (and acted? (not (eq? frm new-frm)))
              (layout-frame! new-frm)
              (invalidate-leaf-caches! leaf-caches))
-
-           ;; After content change, invalidate row caches
            (when (and acted? (dirty-dirty? db2))
+             (define ext (dirty-extent db2))
+             (when ext (fontify-change! buf ext))
              (invalidate-leaf-caches! leaf-caches))
-
-           ;; Render if anything changed
            (define new-cache
              (if (or acted? (not (eq? frm new-frm)))
                  (with-handlers ([exn:fail? (λ (e)
@@ -378,7 +381,6 @@
                                  cache)])
                    (render-and-flush db2 new-frm cache fc leaf-caches))
                  cache))
-
            (loop db2 new-frm new-cache leaf-caches)])))
 
     ;; Cleanup on exit (normal or exception)
