@@ -10,7 +10,7 @@
 ;;   key-event  ──→  dispatch (cmd-self-insert, cmd-forward-char, ...)
 ;;     │
 ;;     ▼
-;;   dirty-buffer  ←─  kernel/edit.rkt (db → db, pure)
+;;   dirty-buffer  ←─  kernel/base-edit.rkt (db → db, pure)
 ;;     │
 ;;     ├─→  syntax-update!  ←─  lang/apply.rkt
 ;;     │      └─ syntax-scan! + keyword-scan! → writes face symbols into text-props
@@ -59,7 +59,7 @@
          "kernel/data/gap.rkt"
          "kernel/data/query.rkt"
          "kernel/dirty.rkt"
-         "kernel/edit.rkt"
+         "kernel/base-edit.rkt"
          "lang/apply.rkt"
          "lang/racket-lang.rkt"
          "lang/scheme-lang.rkt"

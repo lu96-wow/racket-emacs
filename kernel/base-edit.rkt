@@ -1,6 +1,6 @@
 #lang racket
 
-;; kernel/edit.rkt — Editing commands
+;; kernel/base-edit.rkt — Basic editing commands (no syntax-table dependency)
 ;;
 ;; Composes dirty-buffer + kill-ring into editing operations.
 ;; Commands operate on dirty-buffer only; cmd-self-insert also takes a char.

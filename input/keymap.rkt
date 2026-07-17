@@ -77,7 +77,7 @@
   (if local (keymap-merge fallback local) fallback))
 
 ;; ============================================================
-;; Command helpers — wrap kernel/edit + display/window into
+;; Command helpers — wrap kernel/base-edit + display/window into
 ;; uniform signature: db frm → (values db frm acted?)
 ;; ============================================================
 
@@ -116,7 +116,7 @@
   ;; db   : dirty-buffer
   ;; frm  : frame
   ;; ke   : key-char | key-ctrl | key-sym | key-mouse
-  ;; self-insert-fn : db char → db  (from kernel/edit.rkt)
+  ;; self-insert-fn : db char → db  (from kernel/base-edit.rkt)
   (cond
     ;; Mouse events: match by (button . action) pair, not full struct.
     ;; Mouse coordinates are variable — button+action is the stable identity.
@@ -139,7 +139,7 @@
   (require rackunit
            "../kernel/buffer.rkt"
            "../kernel/dirty.rkt"
-           "../kernel/edit.rkt")
+           "../kernel/base-edit.rkt")
 
   (test-case "keymap lookup"
     (define called? (box #f))
