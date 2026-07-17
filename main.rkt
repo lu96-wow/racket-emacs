@@ -35,6 +35,10 @@
 ;;     define.rkt      — lang-def data type (faces + keywords + syntax-table)
 ;;     apply.rkt       — unified entry (syntax-setup!, syntax-update!)
 ;;     *-lang.rkt      — language data: racket, scheme, python
+;;   input/      — keyboard input
+;;     key.rkt         — key-char | key-ctrl | key-sym (three disjoint types)
+;;     parse.rkt       — raw bytes → key event
+;;     keymap.rkt      — keymap (hash key→command) + dispatch
 ;;
 ;; All state is explicit.  Zero globals beyond the event loop's
 ;; local bindings and the face-cache / language registry.
@@ -58,7 +62,10 @@
          "lang/apply.rkt"
          "lang/racket-lang.rkt"
          "lang/scheme-lang.rkt"
-         "lang/python-lang.rkt")
+         "lang/python-lang.rkt"
+         "input/key.rkt"
+         "input/parse.rkt"
+         "input/keymap.rkt")
 
 ;; ============================================================
 ;; Initial buffer content
@@ -81,116 +88,42 @@
    "\n"))
 
 ;; ============================================================
-;; Key parsing
+;; ============================================================
+;; Key bindings — pure data: key → command
 ;; ============================================================
 
-;; Read a single key event from stdin (raw mode, no buffering).
-;; Returns one of:
-;;   (list 'char ch)         — printable character
-;;   (list 'escape)          — bare ESC
-;;   (list 'arrow dir)       — 'up 'down 'left 'right
-;;   (list 'ctrl ch)         — control character
-;;   (list 'other n)         — unrecognised
-(define (read-key)
-  ;; Read raw bytes from stdin, parsing escape sequences.
-  (define b (read-byte))
-  (cond
-    [(eof-object? b) '(idle)]  ; VMIN=0 VTIME=1: no data available yet
-    ;; ESC — could be bare Escape or start of an escape sequence
-    [(= b 27)
-     (define b2 (read-byte-or-timeout))
-     (cond
-       [(not b2) '(escape)]
-       [(= b2 91)  ;; ESC [ — CSI sequence
-        (define b3 (read-byte-or-timeout))
-        (case b3
-          [(65) '(arrow up)]
-          [(66) '(arrow down)]
-          [(67) '(arrow right)]
-          [(68) '(arrow left)]
-          [(72) '(arrow home)]
-          [(70) '(arrow end)]
-          [(51) ;; ESC [ 3 ~ → Delete
-           (let ([b4 (read-byte-or-timeout)])
-             (if (and b4 (= b4 126)) '(delete) '(escape)))]
-          [(49) ;; ESC [ 1 ~ → Home, ESC [ 1 ; 5 D → Ctrl-Left etc
-           (read-and-discard-csi)]
-          [(52) ;; ESC [ 4 ~ → End
-           (read-and-discard-csi)]
-          [(53) ;; ESC [ 5 ~ → PgUp
-           (read-and-discard-csi)]
-          [(54) ;; ESC [ 6 ~ → PgDn
-           (read-and-discard-csi)]
-          [else '(escape)])]
-       [(= b2 79)  ;; ESC O — SS3 (application keypad)
-        (define b3 (read-byte-or-timeout))
-        (case b3
-          [(72) '(arrow home)]
-          [(70) '(arrow end)]
-          [else '(escape)])]
-       [else '(escape)])]
-    ;; Backspace / DEL
-    [(or (= b 127) (= b 8)) '(backspace)]
-    ;; Tab
-    [(= b 9) '(tab)]
-    ;; Enter / Return
-    [(= b 13) '(return)]
-    ;; Ctrl+C → quit
-    [(= b 3) '(quit)]
-    ;; Ctrl+D → EOF-like
-    [(= b 4) '(quit)]
-    ;; Printable ASCII (space through ~)
-    [(<= 32 b 126) (list 'char (integer->char b))]
-    ;; Other control chars → ignore
-    [(< b 32) (list 'other b)]
-    ;; Non-ASCII (UTF-8 continuation or extended) — read full char
-    [else
-     (define bs (read-utf8-char b))
-     (if bs
-         (list 'char (bytes->string/utf-8 bs))
-         (list 'other b))]))
+(define global-keymap (make-keymap))
 
-;; Read a byte or return #f after a short timeout (non-blocking).
-(define (read-byte-or-timeout)
-  ;; In raw mode with VMIN=0 VTIME=0, read-byte returns immediately.
-  ;; If no data available, returns #f.
-  ;; Actually, with VMIN=0 VTIME=0, read-byte can return #<eof> for no data.
-  ;; We use a small wait.  Since we set VMIN=0 VTIME=0, read-byte blocks
-  ;; minimally.  For escape sequences we need to know if another byte follows.
-  ;; We set VMIN=0 VTIME=1 (100ms) for this purpose.
-  ;; For simplicity, just try read-byte — it returns #f/eof immediately.
-  (with-handlers ([exn:fail:filesystem? (λ (e) #f)])
-    (let ([b (read-byte)])
-      (if (eof-object? b) #f b))))
+(keymap-set! global-keymap (key-sym 'up)        (edit-cmd cmd-prev-line))
+(keymap-set! global-keymap (key-sym 'down)      (edit-cmd cmd-next-line))
+(keymap-set! global-keymap (key-sym 'left)      (edit-cmd cmd-backward-char))
+(keymap-set! global-keymap (key-sym 'right)     (edit-cmd cmd-forward-char))
+(keymap-set! global-keymap (key-sym 'home)      (edit-cmd cmd-beginning-of-line))
+(keymap-set! global-keymap (key-sym 'end)       (edit-cmd cmd-end-of-line))
+(keymap-set! global-keymap (key-sym 'backspace) (edit-cmd cmd-backward-delete))
+(keymap-set! global-keymap (key-sym 'delete)    (edit-cmd cmd-forward-delete))
+(keymap-set! global-keymap (key-sym 'return)    (edit-cmd cmd-newline))
+(keymap-set! global-keymap (key-sym 'tab)       (edit-cmd cmd-tab))
+(keymap-set! global-keymap (key-sym 'escape)    nop-cmd)
 
-;; Consume and discard remaining CSI sequence bytes
-(define (read-and-discard-csi)
-  ;; Read until we get a final byte (letter or ~) or timeout
-  (let loop ()
-    (define b (read-byte-or-timeout))
-    (when (and b (not (member b '(65 66 67 68 72 70 126))))
-      (loop)))
-  '(escape))
+;; Control keys
+(keymap-set! global-keymap (key-ctrl #\a) (edit-cmd cmd-beginning-of-line))
+(keymap-set! global-keymap (key-ctrl #\e) (edit-cmd cmd-end-of-line))
+(keymap-set! global-keymap (key-ctrl #\f) (edit-cmd cmd-forward-char))
+(keymap-set! global-keymap (key-ctrl #\b) (edit-cmd cmd-backward-char))
+(keymap-set! global-keymap (key-ctrl #\p) (edit-cmd cmd-prev-line))
+(keymap-set! global-keymap (key-ctrl #\n) (edit-cmd cmd-next-line))
+(keymap-set! global-keymap (key-ctrl #\d) (edit-cmd cmd-forward-delete))
+(keymap-set! global-keymap (key-ctrl #\k) (edit-cmd cmd-kill-line))
+(keymap-set! global-keymap (key-ctrl #\y) (edit-cmd cmd-yank))
+(keymap-set! global-keymap (key-ctrl #\_) (edit-cmd cmd-undo))
+(keymap-set! global-keymap (key-ctrl #\r) (edit-cmd cmd-redo))
 
-;; Read a full UTF-8 character given the first byte
-(define (read-utf8-char first-byte)
-  (define len (utf8-char-len first-byte))
-  (define buf (make-bytes len))
-  (bytes-set! buf 0 first-byte)
-  (let loop ([i 1])
-    (if (>= i len)
-        buf
-        (let ([b (read-byte)])
-          (if (eof-object? b)
-              buf
-              (begin (bytes-set! buf i b) (loop (add1 i))))))))
-
-;; UTF-8 start byte length
-(define (utf8-char-len b)
-  (cond [(< b #x80) 1]
-        [(< b #xE0) 2]
-        [(< b #xF0) 3]
-        [else      4]))
+;; Window
+(keymap-set! global-keymap (key-char #\p)
+  (window-cmd (λ (frm) (frame-split-leaf! frm 'vertical) frm)))
+(keymap-set! global-keymap (key-ctrl #\o)
+  (window-cmd (λ (frm) (frame-select-next! frm) frm)))
 
 ;; ============================================================
 ;; Per-leaf row cache management
@@ -291,48 +224,6 @@
   frame-vb)
 
 ;; ============================================================
-;; Dispatch — key event → dirty-buffer
-;; ============================================================
-
-(define (dispatch db key frm)
-  ;; Returns (values new-db new-frm action-performed?)
-  (match key
-    ;; Movement
-    ['(arrow left)   (values (cmd-backward-char db) frm #t)]
-    ['(arrow right)  (values (cmd-forward-char db) frm #t)]
-    ['(arrow up)     (values (cmd-prev-line db) frm #t)]
-    ['(arrow down)   (values (cmd-next-line db) frm #t)]
-    ['(arrow home)   (values (cmd-beginning-of-line db) frm #t)]
-    ['(arrow end)    (values (cmd-end-of-line db) frm #t)]
-
-    ;; Deletion
-    ['(backspace)    (values (cmd-backward-delete db) frm #t)]
-    ['(delete)       (values (cmd-forward-delete db) frm #t)]
-
-    ;; Newline / Tab
-    ['(return)       (values (cmd-newline db) frm #t)]
-    ['(tab)          (values (cmd-tab db) frm #t)]
-
-    ;; Window split — 'p' key
-    [(list 'char #\p)
-     (let ([new (frame-split-leaf! frm 'vertical)])
-       (values db frm #t))]
-
-    ;; Self-insert for other printable characters
-    [(list 'char ch)
-     (values (cmd-self-insert db ch) frm #t)]
-
-    ;; Escape → ignore
-    ['(escape)       (values db frm #f)]
-
-    ;; Unknown → ignore
-    [_                (values db frm #f)]))
-
-;; ============================================================
-;; Main event loop
-;; ============================================================
-
-;; ============================================================
 ;; Language setup — populate the registry once
 ;; ============================================================
 
@@ -375,13 +266,13 @@
 
       ;; --- Event loop ---
       (let loop ([db db] [frm frm] [cache cache] [leaf-caches leaf-caches])
-        (define key (read-key))
+        (define ke (read-key))
         (cond
-          [(equal? key '(idle))  (loop db frm cache leaf-caches)]
-          [(equal? key '(quit))  (void)]
+          [(key-idle? ke)  (loop db frm cache leaf-caches)]
+          [(key-quit? ke)  (void)]
           [else
            (define-values (new-db new-frm acted?)
-             (dispatch db key frm))
+             (dispatch-key global-keymap db frm ke cmd-self-insert))
            (define db2 (if acted? (dirty-commit! new-db) new-db))
            (when (and acted? (not (eq? frm new-frm)))
              (layout-frame! new-frm)
