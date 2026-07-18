@@ -44,6 +44,9 @@
  cmd-backward-delete cmd-forward-delete
  cmd-kill-line
 
+ ;; ── region ──
+ cmd-kill-region cmd-delete-region cmd-copy-region
+
  ;; ── yank / paste ──
  cmd-yank cmd-yank-pop
 
@@ -129,6 +132,46 @@
        (kill-new "\n")
        (yank-mark-start! db1 pt))]
     [else db]))
+
+;; ============================================================
+;; Region — kill / delete / copy the active region
+;; ============================================================
+
+(define (cmd-kill-region db)
+  ;; Kill text in the active region and push to kill-ring.
+  (define buf (dirty-buffer-buf db))
+  (if (region-active? buf)
+      (let* ([beg  (region-beginning buf)]
+             [end  (region-end buf)]
+             [text (dirty-substring db beg end)]
+             [db1  (dirty-delete! db beg end)]
+             [db2  (dirty-set-point! db1 beg)])
+        (kill-new text)
+        (deactivate-mark! buf)
+        db2)
+      db))
+
+(define (cmd-delete-region db)
+  ;; Delete text in the active region without pushing to kill-ring.
+  (define buf (dirty-buffer-buf db))
+  (if (region-active? buf)
+      (let* ([beg  (region-beginning buf)]
+             [end  (region-end buf)]
+             [db1  (dirty-delete! db beg end)]
+             [db2  (dirty-set-point! db1 beg)])
+        (deactivate-mark! buf)
+        db2)
+      db))
+
+(define (cmd-copy-region db)
+  ;; Copy text in the active region to kill-ring without deleting.
+  (define buf (dirty-buffer-buf db))
+  (if (region-active? buf)
+      (let ([text (dirty-substring db (region-beginning buf) (region-end buf))])
+        (kill-new text)
+        (deactivate-mark! buf)
+        db)
+      db))
 
 ;; ============================================================
 ;; Yank / Paste

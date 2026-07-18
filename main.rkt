@@ -123,6 +123,8 @@
    (cons (key-ctrl #\b) (edit-cmd cmd-backward-char))
    (cons (key-ctrl #\p) (edit-cmd cmd-prev-line))
    (cons (key-ctrl #\n) (edit-cmd cmd-next-line))
+   (cons (key-ctrl #\w) (edit-cmd cmd-kill-region))
+   (cons (key-ctrl #\t) (edit-cmd cmd-set-mark))
    (cons (key-ctrl #\u) (edit-cmd cmd-forward-delete))
    (cons (key-ctrl #\k) (edit-cmd cmd-kill-line))
    (cons (key-ctrl #\y) (edit-cmd cmd-yank))

@@ -83,6 +83,21 @@
   (or (guard-read-only db)
       (base:cmd-kill-line db)))
 
+(define (cmd-kill-region db)
+  ;; Kill (cut) the active region to kill-ring.
+  (or (guard-read-only db)
+      (base:cmd-kill-region db)))
+
+(define (cmd-delete-region db)
+  ;; Delete the active region without pushing to kill-ring.
+  (or (guard-read-only db)
+      (base:cmd-delete-region db)))
+
+(define (cmd-copy-region db)
+  ;; Copy the active region to kill-ring without deleting.
+  (or (guard-read-only db)
+      (base:cmd-copy-region db)))
+
 (define (cmd-yank db)
   (or (guard-read-only db)
       (base:cmd-yank db)))
@@ -128,6 +143,9 @@
 (define cmd-backward-delete/unchecked base:cmd-backward-delete)
 (define cmd-forward-delete/unchecked  base:cmd-forward-delete)
 (define cmd-kill-line/unchecked      base:cmd-kill-line)
+(define cmd-kill-region/unchecked    base:cmd-kill-region)
+(define cmd-delete-region/unchecked  base:cmd-delete-region)
+(define cmd-copy-region/unchecked    base:cmd-copy-region)
 (define cmd-yank/unchecked           base:cmd-yank)
 (define cmd-yank-pop/unchecked       base:cmd-yank-pop)
 (define cmd-undo/unchecked           base:cmd-undo)
@@ -279,6 +297,7 @@
  cmd-self-insert cmd-newline cmd-tab
  cmd-backward-delete cmd-forward-delete
  cmd-kill-line
+ cmd-kill-region cmd-delete-region cmd-copy-region
  cmd-yank cmd-yank-pop
  cmd-undo cmd-redo
 
@@ -286,6 +305,8 @@
  cmd-self-insert/unchecked cmd-newline/unchecked cmd-tab/unchecked
  cmd-backward-delete/unchecked cmd-forward-delete/unchecked
  cmd-kill-line/unchecked
+ cmd-kill-region/unchecked cmd-delete-region/unchecked
+ cmd-copy-region/unchecked
  cmd-yank/unchecked cmd-yank-pop/unchecked
  cmd-undo/unchecked cmd-redo/unchecked
 
