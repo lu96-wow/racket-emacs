@@ -59,7 +59,6 @@
          "kernel/data/gap.rkt"
          "kernel/data/query.rkt"
          "kernel/dirty.rkt"
-         "kernel/base-edit.rkt"
          "edit.rkt"
          "kernel/data/syntax.rkt"
          "lang/apply.rkt"

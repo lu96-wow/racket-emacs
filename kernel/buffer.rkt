@@ -83,8 +83,6 @@
 
 (define (buffer-insert! buf str byte-pos)
   ;; Returns (values byte-pos byte-pos+blen) — the inserted range.
-  (when (buffer-read-only? buf)
-    (error 'buffer-insert! "buffer is read-only: ~a" (buffer-name buf)))
   (define bs (string->bytes/utf-8 str))
   (define blen (bytes-length bs))
   (if (positive? blen)
@@ -101,8 +99,6 @@
 
 (define (buffer-delete! buf from to)
   ;; Returns (values from from) — position of the deletion.
-  (when (buffer-read-only? buf)
-    (error 'buffer-delete! "buffer is read-only: ~a" (buffer-name buf)))
   (if (< from to)
       (let ([text-str (buffer-substring buf from to)])
         (text-delete! (buffer-text buf) from to)
