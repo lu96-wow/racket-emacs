@@ -103,7 +103,7 @@
                      (when bs (display bs out))))]
               [else (void)])
             (display ch out)
-            (loop (add1 c) (= (char-display-width ch) 2))))))
+            (loop (add1 c) (>= (char-display-width ch) 2))))))
 
   ;; Reset at end of row
   (when (or active-attrs (not (= active-face-id 0)))

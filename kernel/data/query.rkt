@@ -21,6 +21,7 @@
  ;; navigation
  gap-next-char-pos      ; gap-buffer? byte-pos -> byte-pos
  gap-prev-char-pos      ; gap-buffer? byte-pos -> byte-pos
+ gap-char-start         ; gap-buffer? byte-pos -> byte-pos — snap to char boundary
  gap-skip-n             ; gap-buffer? byte-pos n -> byte-pos
 
  ;; scanning
@@ -97,6 +98,14 @@
                       [(utf8-start-byte? (bytes-ref bs p)) p]
                       [else (loop (sub1 p))]))])
         (logical-index gb prev-phys))))
+
+(define (gap-char-start gb byte-pos)
+  ;; Snap byte-pos to a valid UTF-8 character boundary.
+  ;; If byte-pos is in the middle of a multi-byte char, walk back to its start.
+  (define bs (gap-buffer-bytes gb))
+  (define phys (physical-index gb byte-pos))
+  (define snapped-phys (utf8-char-start bs phys))
+  (logical-index gb snapped-phys))
 
 (define (gap-skip-n gb pos n)
   (let loop ([p pos] [i n])

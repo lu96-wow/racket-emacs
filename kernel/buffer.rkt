@@ -20,6 +20,7 @@
 ;;   The caller composes these freely; kernel never tracks dirty state.
 
 (require "data/text.rkt"
+         "data/query.rkt"
          "data/textprop.rkt"
          "undo/record.rkt"
          "undo/recorder.rkt"
@@ -201,8 +202,12 @@
   (text-marker-pos (buffer-text buf) (buffer-point-marker buf)))
 
 (define (set-buffer-point! buf pos)
-  (text-set-marker-pos! (buffer-text buf) (buffer-point-marker buf)
-                        (max 0 (min pos (buffer-length buf)))))
+  ;; Clamp to [0, buflen] then snap to nearest valid UTF-8 character start.
+  ;; Prevents cursor from landing in the middle of a multi-byte character.
+  (define clamped (max 0 (min pos (buffer-length buf))))
+  (define gb (text-gap (buffer-text buf)))
+  (define safe (gap-char-start gb clamped))
+  (text-set-marker-pos! (buffer-text buf) (buffer-point-marker buf) safe))
 
 ;; ============================================================
 ;; Mark / Region

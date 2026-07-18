@@ -18,7 +18,8 @@
 
  ;; navigation (on raw bytes, no gap needed)
  utf8-next-pos       ; bytes? byte-pos -> byte-pos
- utf8-prev-pos)      ; bytes? byte-pos -> byte-pos
+ utf8-prev-pos       ; bytes? byte-pos -> byte-pos
+ utf8-char-start)    ; bytes? byte-pos -> byte-pos — snap to char boundary      ; bytes? byte-pos -> byte-pos
 
 ;; ============================================================
 ;; Classification
@@ -84,3 +85,12 @@
     (cond [(< p 0) 0]
           [(utf8-start-byte? (bytes-ref bs p)) p]
           [else (loop (sub1 p))])))
+
+(define (utf8-char-start bs byte-pos)
+  ;; Snap byte-pos to the nearest valid UTF-8 character start.
+  ;; If already at a start byte (or at end of bytes), return unchanged.
+  ;; If in the middle of a multi-byte char, walk back to its start byte.
+  (if (or (>= byte-pos (bytes-length bs))
+          (utf8-start-byte? (bytes-ref bs byte-pos)))
+      byte-pos
+      (utf8-prev-pos bs (add1 byte-pos))))

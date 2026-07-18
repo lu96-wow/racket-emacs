@@ -216,8 +216,8 @@
              (when (< col max-cols)
                (vbuffer-put-char! vb row col ch #:face-id fid))
              (set! glyphs-rev (cons (glyph ch cw fid) glyphs-rev))
-             ;; Skip next column for wide chars (display-width=2)
-             (loop (+ col (if (= cw 2) 2 1))
+             ;; Skip next column for wide chars (display-width≥2)
+             (loop (+ col (if (>= cw 2) 2 1))
                    (add1 char-idx)
                    (gap-next-char-pos gb byte-pos))])))
 
