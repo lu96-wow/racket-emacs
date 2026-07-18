@@ -58,6 +58,7 @@
          "kernel/data/marker.rkt"
          "kernel/data/gap.rkt"
          "kernel/data/query.rkt"
+         "kernel/data/textprop.rkt"
          "kernel/dirty.rkt"
          "edit.rkt"
          "kernel/data/syntax.rkt"
@@ -67,6 +68,7 @@
          "lang/python-lang.rkt"
          "lang/bracket-cache.rkt"
          "lang/font-lock.rkt"
+         "lang/incremental-colorer.rkt"
          "input/key.rkt"
          "input/parse.rkt"
          "input/keymap.rkt")
@@ -356,12 +358,20 @@
       (define languages (list racket-lang-def scheme-lang-def python-lang-def))
 
       ;; Match language → activate faces → scan → returns syntax-config
-      ;; No external table: cfg lives in editor-buffer struct.
       (bracket-register-faces!)
       (define cfg (syntax-setup! buf languages))
       (define bkt-cache (make-bracket-cache))
+
+      ;; Incremental colorer (DrRacket token-tree based) — primary coloring
+      (define clr-state (make-colorer-state))
+      ;; Initial full scan via incremental colorer
+      (let ([gb (text-gap (buffer-text buf))]
+            [tp (buffer-text-props buf)])
+        (textprop-remove-key! tp 0 (gap-length gb) 'face)
+        (colorer-full-scan! clr-state gb tp))
+
       (define ebuf (editor-buffer buf cfg bkt-cache #f))
-      ;; Initial bracket scan (after syntax faces are written)
+      ;; Bracket scan (uses 'bracket-face key, independent of colorer)
       (bracket-rescan-all! bkt-cache
                            (text-gap (buffer-text buf))
                            (buffer-text-props buf)
@@ -378,13 +388,27 @@
           (render-and-flush db frm #f fc leaf-caches)))
 
       ;; --- Event loop ---
-      (let loop ([db db] [frm frm] [cache cache] [leaf-caches leaf-caches] [ebuf ebuf])
+      (let loop ([db db] [frm frm] [cache cache] [leaf-caches leaf-caches]
+                 [ebuf ebuf] [clr clr-state]
+                 [prev-buf-len (buffer-length (dirty-buffer-buf db))])
         (define ke (read-key))
         (cond
-          [(key-idle? ke)  (loop db frm cache leaf-caches ebuf)]
+          [(key-idle? ke)
+           ;; Idle: continue incremental coloring if needed
+           (define clr2
+             (if (colorer-state-needs-work? clr)
+                 (let ([buf (editor-buffer-buf ebuf)])
+                   (with-handlers ([exn:fail? (λ (e) clr)])
+                     (colorer-continue! clr
+                       (text-gap (buffer-text buf))
+                       (buffer-text-props buf)
+                       20
+                       (λ () (invalidate-leaf-caches! leaf-caches)))
+                     clr))
+                 clr))
+           (loop db frm cache leaf-caches ebuf clr2 prev-buf-len)]
           [(key-quit? ke)  (void)]
           [else
-           ;; Resolve keymap: local (from ebuf) or fallback to global
            (define km (keymap-resolve (editor-buffer-local-keymap ebuf) global-keymap))
            (define-values (new-db new-frm acted?)
              (dispatch-key km db frm ke cmd-self-insert))
@@ -392,15 +416,31 @@
            (when (and acted? (not (eq? frm new-frm)))
              (layout-frame! new-frm)
              (invalidate-leaf-caches! leaf-caches))
+           (define new-prev-len prev-buf-len)
            (when (and acted? (dirty-dirty? db2))
              (define ext (dirty-extent db2))
              (when ext
-               (syntax-update! (editor-buffer-syntax-config ebuf) (editor-buffer-buf ebuf) ext)
-               (bracket-update! (editor-buffer-bracket-cache ebuf)
-                                (text-gap (buffer-text (editor-buffer-buf ebuf)))
-                                (buffer-text-props (editor-buffer-buf ebuf))
-                                (syntax-config-syntax-table (editor-buffer-syntax-config ebuf))
-                                ext))
+               (define buf (editor-buffer-buf ebuf))
+               (define gb (text-gap (buffer-text buf)))
+               (define tp (buffer-text-props buf))
+               (define new-len (gap-length gb))
+               (define delta (- new-len prev-buf-len))
+               (set! new-prev-len new-len)
+               ;; Primary: incremental colorer (DrRacket token-tree style)
+               (with-handlers ([exn:fail? (λ (e)
+                               ;; Fallback: font-lock full rescan on error
+                               (when cfg
+                                 (syntax-update! cfg buf ext))
+                               (void))])
+                 (colorer-on-edit! clr gb tp (car ext) delta)
+                 (colorer-continue! clr gb tp 10 #f))
+               ;; Bracket coloring (separate 'bracket-face key)
+               (with-handlers ([exn:fail? (λ (e) (void))])
+                 (bracket-update! (editor-buffer-bracket-cache ebuf)
+                                  gb tp
+                                  (syntax-config-syntax-table
+                                   (editor-buffer-syntax-config ebuf))
+                                  ext)))
              (invalidate-leaf-caches! leaf-caches))
            (define new-cache
              (if (or acted? (not (eq? frm new-frm)))
@@ -409,7 +449,7 @@
                                  cache)])
                    (render-and-flush db2 new-frm cache fc leaf-caches))
                  cache))
-           (loop db2 new-frm new-cache leaf-caches ebuf)])))
+           (loop db2 new-frm new-cache leaf-caches ebuf clr new-prev-len)])))
 
     ;; Cleanup on exit (normal or exception)
     (λ ()
