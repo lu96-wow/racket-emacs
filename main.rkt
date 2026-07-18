@@ -21,6 +21,9 @@
 ;;   dirty-clear!  (reset change marker)
 ;;     │
 ;;     ▼
+;;   update-scroll!  (apply calc-scroll to leaf markers)
+;;     │
+;;     ▼
 ;;   render-frame  ──→  display/layout + display/render  ──→  vbuffer
 ;;     │
 ;;     ▼
@@ -145,16 +148,40 @@
                       (values db frm acted?))))))
 
 ;; ============================================================
+;; Scroll update — apply calc-scroll to leaf markers
+;; ============================================================
+
+(define (update-scroll! frm leaf-caches)
+  ;; For each leaf: compute scroll → apply to leaf markers.
+  ;; Invalidate row-cache when scroll position changes.
+  ;; Called before render-frame so render is pure.
+  (for ([lf (in-list (focus-list (frame-tree frm)))])
+    (define geo (leaf-geometry frm lf))
+    (when geo
+      (define buf (leaf-buffer lf))
+      (define gb  (text-gap (buffer-text buf)))
+      (define pt  (marker-pos (leaf-point lf)))
+      (define ws  (marker-pos (leaf-start lf)))
+      (define rows (rect-rows geo))
+      (define cols (rect-cols geo))
+      (define hs  (leaf-hscroll lf))
+
+      (define-values (new-start new-hscroll)
+        (calc-scroll gb pt ws rows cols hs 'none))
+
+      (when (or (not (= new-start ws)) (not (= new-hscroll hs)))
+        (apply-scroll! lf new-start new-hscroll)
+        (define rc (hash-ref leaf-caches lf #f))
+        (when rc (row-cache-invalidate! rc))))))
+
+;; ============================================================
 ;; Render pipeline
 ;; ============================================================
 
-(define (render-frame db frm face-cache leaf-caches)
-  ;; Compute scroll + layout + render for all leaves.
+(define (render-frame frm face-cache leaf-caches)
+  ;; Pure: read leaf state (scroll already applied by update-scroll!),
+  ;; compute layout + render for all leaves.
   ;; Returns (values frame-vb cursor-row cursor-col).
-  ;;
-  ;; KEY DESIGN: scroll calculation is PURE (calc-scroll).
-  ;; apply-scroll! is called OUTSIDE the render to mutate leaf markers.
-  ;; The render itself reads leaf state and produces a vbuffer.
   (define fw (frame-w frm))
   (define fh (frame-h frm))
   (define frame-vb (make-vbuffer fh fw))
@@ -173,27 +200,15 @@
       (define cols (rect-cols geo))
       (define hs  (leaf-hscroll lf))
 
-      ;; ── Step 1: Pure scroll calculation ──
-      (define-values (new-start new-hscroll)
-        (calc-scroll gb pt ws rows cols hs 'none))
-
-      ;; ── Step 2: Apply scroll (mutation) ──
-      (define scroll-changed?
-        (or (not (= new-start ws)) (not (= new-hscroll hs))))
-      (when scroll-changed?
-        (apply-scroll! lf new-start new-hscroll)
-        (define rc (hash-ref leaf-caches lf #f))
-        (when rc (row-cache-invalidate! rc)))
-
-      ;; ── Step 3: Pure layout ──
+      ;; Pure layout
       (define ly (compute-layout gb pt
-                    #:start-pos new-start
+                    #:start-pos ws
                     #:max-rows  rows
                     #:max-cols  cols
                     #:wrap-mode 'none
-                    #:left-col  new-hscroll))
+                    #:left-col  hs))
 
-      ;; ── Step 4: Render (with row cache) ──
+      ;; Render (with row cache)
       (define rc (hash-ref! leaf-caches lf
                             (λ () (make-row-cache (max rows 100)))))
       (define reg-active? (region-active? buf))
@@ -204,10 +219,10 @@
                                            (region-end buf) rc)
             (render-layout/cached! ly gb face-cache rc)))
 
-      ;; ── Step 5: Blit leaf vbuffer into frame vbuffer ──
+      ;; Blit leaf vbuffer into frame vbuffer
       (vbuffer-blit! frame-vb (rect-top geo) (rect-left geo) leaf-vb)
 
-      ;; ── Step 6: Track cursor of selected leaf ──
+      ;; Track cursor of selected leaf
       (when (eq? lf sel)
         (define cr (layout-cursor-row ly))
         (define cc (layout-cursor-col ly))
@@ -267,11 +282,12 @@
       (define leaf-caches (make-hasheq))
 
       ;; ── Initial render ──
+      (update-scroll! frm leaf-caches)
       (define-values (vb _cr _cc)
         (with-handlers ([exn:fail? (λ (e)
                         (eprintf "Render error: ~a\n" (exn-message e))
                         (make-vbuffer (terminal-height) (terminal-width)))])
-          (render-frame db frm fc leaf-caches)))
+          (render-frame frm fc leaf-caches)))
       (define cache-vb vb)
       (flush-frame vb #f fc _cr _cc)
 
@@ -293,42 +309,44 @@
            (detect-terminal-size!)
            (define new-frm (frame-resize frm (terminal-width) (terminal-height)))
            (invalidate-leaf-caches! leaf-caches)
+           (update-scroll! new-frm leaf-caches)
            (define-values (new-vb cr cc)
-             (render-frame db new-frm fc leaf-caches))
+             (render-frame new-frm fc leaf-caches))
            (flush-frame new-vb #f fc cr cc)
            (loop db new-frm new-vb leaf-caches)]
 
           ;; Normal key → dispatch
           [else
            ;; Step 1: dispatch command
-           (define-values (new-db new-frm acted?)
+           (define-values (db1 frm1 acted?)
              (dispatch-key global-keymap db frm ke cmd-self-insert))
 
-           ;; Step 2: commit undo boundary (if content changed)
-           (define db2
-             (if (and acted? (dirty-dirty? new-db))
-                 (dirty-commit! new-db)
-                 new-db))
+           ;; Step 2: commit undo boundary (side effect, returns same struct)
+           (when (and acted? (dirty-dirty? db1))
+             (dirty-commit! db1))
 
            ;; Step 3: handle window structure changes
-           (when (and acted? (not (eq? frm new-frm)))
-             (layout-frame! new-frm)
+           (when (and acted? (not (eq? frm frm1)))
+             (layout-frame! frm1)
              (invalidate-leaf-caches! leaf-caches))
 
            ;; Step 4: clear change marker (colorer would process it here)
-           (define db3 (dirty-clear! db2))
+           (define new-db (dirty-clear! db1))
 
-           ;; Step 5: render if anything changed
-           (if (or acted? (not (eq? frm new-frm)))
+           ;; Step 5: update scroll before pure render
+           (update-scroll! frm1 leaf-caches)
+
+           ;; Step 6: render if anything changed
+           (if (or acted? (not (eq? frm frm1)))
                (let ()
                  (define-values (new-vb cr cc)
                    (with-handlers ([exn:fail? (λ (e)
                                    (eprintf "Render error: ~a\n" (exn-message e))
                                    (values cache-vb 0 0))])
-                     (render-frame db3 new-frm fc leaf-caches)))
+                     (render-frame frm1 fc leaf-caches)))
                  (flush-frame new-vb cache-vb fc cr cc)
-                 (loop db3 new-frm new-vb leaf-caches))
-               (loop db3 new-frm cache-vb leaf-caches))])))
+                 (loop new-db frm1 new-vb leaf-caches))
+               (loop new-db frm1 cache-vb leaf-caches))])))
 
     ;; ── Cleanup on exit (normal or exception) ──
     (λ ()
