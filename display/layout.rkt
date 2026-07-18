@@ -257,9 +257,9 @@
            (let ([nl (gap-scan-byte gb pt-pos 'backward (λ (b) (= b #x0A)))])
              (if (>= nl 0) (add1 nl) 0))]
           [(point-below? gb pt-pos start-pos max-rows max-cols wrap-mode len)
-           ;; Point below → scroll down so point is 2/3 from top
-           (define target-lines (max 1 (quotient (* max-rows 2) 3)))
-           (beginning-of-nth-prev-line gb pt-pos target-lines)]
+           ;; Point below → scroll down by ONE line
+           (let ([nl (gap-scan-byte gb start-pos 'forward (λ (b) (= b #x0A)))])
+             (if (< nl len) (add1 nl) start-pos))]
           [else #f]))
 
   ;; Horizontal (truncate mode only): after vertical scroll hscroll resets
