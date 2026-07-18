@@ -265,6 +265,7 @@
  make-bracket-cache
  bracket-update!
  bracket-rescan-all!
+ bracket-scan/list          ; gb st start end → (listof (cons pos face-name))
  bracket-state-at
  bracket-find-match
  bracket-register-faces!)
@@ -375,6 +376,20 @@
   (define-face! bracket-mismatch-face
                 (make-face-attrs 'foreground (list 255 255 255)
                                  'background (list 180 0 0))))
+
+;; ============================================================================
+;; bracket-scan/list — pure scan, returns face list (thread-safe)
+;; ============================================================================
+;; Returns (listof (cons byte-pos face-name)).
+;; Does NOT write to text-props or update cache.
+;; Can run on a snapshot gap-buffer in any thread.
+
+(define (bracket-scan/list gb st start end)
+  (define rules (syntax-table-multi-rules st))
+  (define-values (_st _pos _cps emits-rev)
+    (scan-chars! gb start end initial-scan-state rules
+                 (bracket-cache-interval (make-bracket-cache)) st #f))
+  (reverse emits-rev))
 
 ;; ============================================================================
 ;; Bracket matching helpers
