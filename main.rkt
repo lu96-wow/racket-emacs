@@ -67,7 +67,6 @@
          "lang/python-lang.rkt"
          "lang/bracket-cache.rkt"
          "lang/font-lock.rkt"
-         "lang/scan-worker.rkt"
          "input/key.rkt"
          "input/parse.rkt"
          "input/keymap.rkt")
@@ -368,9 +367,6 @@
                            (buffer-text-props buf)
                            (syntax-config-syntax-table cfg))
 
-      ;; Async scan worker
-      (define scan-w (make-scan-worker))
-
       (define frm (make-frame buf (terminal-width) (terminal-height)))
       (define leaf-caches (make-hasheq))
       (set-buffer-point! buf (buffer-length buf))
@@ -382,17 +378,13 @@
           (render-and-flush db frm #f fc leaf-caches)))
 
       ;; --- Event loop ---
-      (let loop ([db db] [frm frm] [cache cache] [leaf-caches leaf-caches] [ebuf ebuf]
-                 [scan-w scan-w])
+      (let loop ([db db] [frm frm] [cache cache] [leaf-caches leaf-caches] [ebuf ebuf])
         (define ke (read-key))
         (cond
-          [(key-idle? ke)
-           ;; Idle: collect any completed async scan results, then loop.
-           (when (scan-worker-pending? scan-w)
-             (scan-worker-collect! scan-w (buffer-text-props (editor-buffer-buf ebuf))))
-           (loop db frm cache leaf-caches ebuf scan-w)]
+          [(key-idle? ke)  (loop db frm cache leaf-caches ebuf)]
           [(key-quit? ke)  (void)]
           [else
+           ;; Resolve keymap: local (from ebuf) or fallback to global
            (define km (keymap-resolve (editor-buffer-local-keymap ebuf) global-keymap))
            (define-values (new-db new-frm acted?)
              (dispatch-key km db frm ke cmd-self-insert))
@@ -400,30 +392,24 @@
            (when (and acted? (not (eq? frm new-frm)))
              (layout-frame! new-frm)
              (invalidate-leaf-caches! leaf-caches))
-           ;; Collect any completed async results before scheduling new scan.
-           (when (scan-worker-pending? scan-w)
-             (scan-worker-collect! scan-w (buffer-text-props (editor-buffer-buf ebuf))))
-           ;; Schedule async scan if content changed.
-           (define db3
-             (if (and acted? (dirty-dirty? db2))
-                 (let* ([ext (dirty-extent db2)]
-                        [_ (when ext
-                             (scan-worker-schedule! scan-w
-                               (text-gap (buffer-text (editor-buffer-buf ebuf)))
-                               (syntax-config-syntax-table (editor-buffer-syntax-config ebuf))
-                               (editor-buffer-syntax-config ebuf)
-                               ext))])
-                   (invalidate-leaf-caches! leaf-caches)
-                   (dirty-clear! db2))
-                 db2))
+           (when (and acted? (dirty-dirty? db2))
+             (define ext (dirty-extent db2))
+             (when ext
+               (syntax-update! (editor-buffer-syntax-config ebuf) (editor-buffer-buf ebuf) ext)
+               (bracket-update! (editor-buffer-bracket-cache ebuf)
+                                (text-gap (buffer-text (editor-buffer-buf ebuf)))
+                                (buffer-text-props (editor-buffer-buf ebuf))
+                                (syntax-config-syntax-table (editor-buffer-syntax-config ebuf))
+                                ext))
+             (invalidate-leaf-caches! leaf-caches))
            (define new-cache
              (if (or acted? (not (eq? frm new-frm)))
                  (with-handlers ([exn:fail? (λ (e)
                                  (eprintf "Render error: ~a\n" (exn-message e))
                                  cache)])
-                   (render-and-flush db3 new-frm cache fc leaf-caches))
+                   (render-and-flush db2 new-frm cache fc leaf-caches))
                  cache))
-           (loop db3 new-frm new-cache leaf-caches ebuf scan-w)])))
+           (loop db2 new-frm new-cache leaf-caches ebuf)])))
 
     ;; Cleanup on exit (normal or exception)
     (λ ()

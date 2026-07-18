@@ -32,11 +32,9 @@
  syntax-config-keywords
  syntax-config-case-fold?
 
- ;; passes (write to text-props)
- syntax-scan! keyword-scan!
-
- ;; passes (pure — return face lists, thread-safe)
- syntax-scan/list keyword-scan/list
+ ;; passes
+ syntax-scan!
+ keyword-scan!
 
  ;; orchestration
  syntax-highlight-region!
@@ -65,17 +63,17 @@
 ;; Syntax pass — syntax-table-driven
 ;; ============================================================
 
-;; Pure version: returns (listof (list start end face-name)).
-;; Can run in any thread — only reads from gb, never writes.
-(define (syntax-scan/list gb st beg end)
+(define (syntax-scan! gb tp st beg end)
+  ;; Walk bytes [beg, end), assign face symbols based on syntax-table st.
+  ;; Handles: line comments, strings, block-comments, heredoc.
   (define len (min end (gap-length gb)))
   (define multi-rules (and st (syntax-table-multi-rules st)))
+
   (define state       'normal)
   (define depth        0)
   (define mark-start   #f)
   (define current-rule #f)
   (define current-delim #f)
-  (define faces-rev '())
 
   (let loop ([pos beg])
     (when (< pos len)
@@ -88,6 +86,7 @@
                (and (gap-match-str-at gb pos (multi-char-rule-start-str r)) r))))
 
       (case state
+        ;; ── normal ──
         [(normal)
          (cond
            [matched-rule
@@ -95,12 +94,14 @@
             (set! mark-start pos)
             (set! depth 1)
             (set! state (multi-char-rule-tag matched-rule))
-            (define start-len (string-length (multi-char-rule-start-str matched-rule)))
+            (define start-len
+              (string-length (multi-char-rule-start-str matched-rule)))
             (define after-start (gap-skip-n gb pos start-len))
             (if (multi-char-rule-delim-capture? matched-rule)
-                (let*-values ([(delim delim-end) (gap-read-delim-word gb after-start)]
+                (let*-values ([(delim delim-end)
+                               (gap-read-delim-word gb after-start)]
                               [(nl) (gap-scan-byte gb delim-end 'forward
-                                                   (λ (b) (= b #x0A)))])
+                                                    (λ (b) (= b #x0A)))])
                   (set! current-delim delim)
                   (if (< nl len) (loop (add1 nl)) (loop len)))
                 (loop after-start))]
@@ -109,72 +110,74 @@
            [(and st (char-comment-start? ch st))
             (define nl (gap-scan-byte gb pos 'forward (λ (b) (= b #x0A))))
             (define ce (min nl len))
-            (set! faces-rev (cons (list pos ce 'font-lock-comment-face) faces-rev))
+            (textprop-put! tp pos ce 'face 'font-lock-comment-face)
             (if (< nl len) (loop (add1 nl)) (loop len))]
            [else (loop pos1)])]
 
+        ;; ── string ──
         [(string)
          (cond
            [(and st (char-escape? ch st))
             (if (< pos1 len) (loop (gap-skip-n gb pos 2)) (loop len))]
            [(and st (char-string-quote? ch st))
-            (set! faces-rev (cons (list mark-start pos1 'font-lock-string-face) faces-rev))
+            (textprop-put! tp mark-start pos1 'face 'font-lock-string-face)
             (set! state 'normal) (loop pos1)]
            [else (loop pos1)])]
 
+        ;; ── multi-char (block-comment, heredoc) ──
         [else
          (define end-str   (multi-char-rule-end-str current-rule))
          (define start-str (multi-char-rule-start-str current-rule))
          (cond
            [(multi-char-rule-delim-capture? current-rule)
-            (cond [(and (gap-at-bol? gb pos) (gap-match-str-at gb pos current-delim))
-                   (define delim-end (gap-skip-n gb pos (string-length current-delim)))
+            (cond [(and (gap-at-bol? gb pos)
+                        (gap-match-str-at gb pos current-delim))
+                   (define delim-end
+                     (gap-skip-n gb pos (string-length current-delim)))
                    (cond [(>= delim-end len)
-                          (set! faces-rev (cons (list mark-start delim-end 'font-lock-string-face) faces-rev))
+                          (textprop-put! tp mark-start delim-end
+                                         'face 'font-lock-string-face)
                           (set! state 'normal) (loop delim-end)]
                          [(char=? (gap-char gb delim-end) #\newline)
-                          (set! faces-rev (cons (list mark-start (add1 delim-end) 'font-lock-string-face) faces-rev))
+                          (textprop-put! tp mark-start (add1 delim-end)
+                                         'face 'font-lock-string-face)
                           (set! state 'normal) (loop (add1 delim-end))]
                          [else
-                          (set! faces-rev (cons (list pos pos1 'font-lock-string-face) faces-rev))
+                          (textprop-put! tp pos pos1
+                                         'face 'font-lock-string-face)
                           (loop pos1)])]
                   [else
-                   (set! faces-rev (cons (list pos pos1 'font-lock-string-face) faces-rev))
+                   (textprop-put! tp pos pos1 'face 'font-lock-string-face)
                    (loop pos1)])]
            [(gap-match-str-at gb pos end-str)
             (set! depth (sub1 depth))
             (define pos2 (gap-skip-n gb pos (string-length end-str)))
             (when (zero? depth)
-              (set! faces-rev (cons (list mark-start pos2 'font-lock-comment-face) faces-rev))
+              (textprop-put! tp mark-start pos2
+                             'face 'font-lock-comment-face)
               (set! state 'normal))
             (loop pos2)]
            [(and (multi-char-rule-nestable? current-rule)
                  (gap-match-str-at gb pos start-str))
             (set! depth (add1 depth))
             (loop (gap-skip-n gb pos (string-length start-str)))]
-           [else (loop pos1)])])))
-  (reverse faces-rev))
-
-;; Side-effecting wrapper: call /list then write to text-props.
-(define (syntax-scan! gb tp st beg end)
-  (for ([f (in-list (syntax-scan/list gb st beg end))])
-    (match-define (list s e face-name) f)
-    (textprop-put! tp s e 'face face-name)))
+           [else (loop pos1)])]))))
 
 ;; ============================================================
 ;; Keyword pass — regex match → face symbol
 ;; ============================================================
 
-;; Pure version: returns (listof (list start end face-name)).
-;; Thread-safe — only reads from gb.
-(define (keyword-scan/list gb keywords beg end case-fold?)
+(define (keyword-scan! gb tp keywords beg end case-fold?)
+  ;; Match regex keywords in [beg, end).  Only write face if position
+  ;; doesn't already have a face (syntax pass has priority).
   (when (null? keywords) (void))
+
   (define text (gap-substring gb beg end))
   (define tlen (string-length text))
   (define len (gap-length gb))
   (define real-end (min end len))
-  (define faces-rev '())
 
+  ;; Build byte-offset map: char-index → byte-pos
   (define byte-offsets
     (let loop ([pos beg] [i 0] [acc '()])
       (if (or (>= pos real-end) (>= i tlen))
@@ -199,16 +202,9 @@
           (define be (if (< me (vector-length byte-offsets))
                          (vector-ref byte-offsets me)
                          real-end))
-          (set! faces-rev (cons (list bb be face-name) faces-rev))
-          (sloop (max (add1 offset) me))))))
-  (reverse faces-rev))
-
-;; Side-effecting wrapper.
-(define (keyword-scan! gb tp keywords beg end case-fold?)
-  (for ([f (in-list (keyword-scan/list gb keywords beg end case-fold?))])
-    (match-define (list s e face-name) f)
-    (unless (textprop-get tp s 'face #f)
-      (textprop-put! tp s e 'face face-name))))
+          (unless (textprop-get tp bb 'face #f)
+            (textprop-put! tp bb be 'face face-name))
+          (sloop (max (add1 offset) me)))))))
 
 ;; ============================================================
 ;; Orchestration
