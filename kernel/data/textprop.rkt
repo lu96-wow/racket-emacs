@@ -69,24 +69,26 @@
     (interval-map-remove! (text-properties-map tp) from to)))
 
 (define (textprop-remove-key! tp from to key)
-  ;; Remove only `key` from properties in [from, to), preserving other
-  ;; keys on the same intervals.  Lets independent engines (font-lock,
-  ;; bracket coloring) own separate keys without clobbering each other.
+  ;; Remove only `key` from properties in [from, to).
+  ;; Walks only intervals that overlap [from, to) using
+  ;; interval-map-ref/bounds — O(k) where k = affected intervals.
   (when (< from to)
     (define im (text-properties-map tp))
-    ;; Collect first (no mutation during iteration), then rewrite.
-    (define hits
-      (for/list ([(ivl h) (in-dict im)]
-                 #:when (and (< (car ivl) to)
-                             (> (cdr ivl) from)
-                             (hash-has-key? h key)))
-        (list (max (car ivl) from) (min (cdr ivl) to) h)))
-    (for ([hit (in-list hits)])
-      (match-define (list s e h) hit)
-      (define h2 (hash-remove h key))
-      (interval-map-remove! im s e)
-      (unless (hash-empty? h2)
-        (interval-map-set! im s e h2)))))
+    (let loop ([pos from])
+      (when (< pos to)
+        ;; interval-map-ref/bounds returns: (values start end value)
+        (define-values (ivl-start ivl-end h)
+          (interval-map-ref/bounds im pos (λ () (hasheq))))
+        (define hit-start (max (or ivl-start 0) from))
+        (define hit-end   (min (or ivl-end to) to))
+        (when (and (< hit-start hit-end) (hash-has-key? h key))
+          (define h2 (hash-remove h key))
+          (interval-map-remove! im ivl-start ivl-end)
+          (unless (hash-empty? h2)
+            (interval-map-set! im ivl-start ivl-end h2)))
+        ;; Advance to next interval
+        (define next (max (add1 pos) hit-end))
+        (when (> next pos) (loop next))))))
 
 ;; ============================================================
 ;; Adjustment — explicit, called by buffer.rkt after each mutation
