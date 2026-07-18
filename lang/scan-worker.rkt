@@ -58,8 +58,11 @@
   (define my-ver (scan-worker-version w))
 
   ;; Snapshot full buffer as an independent, immutable-for-reading gb.
+  ;; make-gap-buffer creates an empty logical buffer; the text must be
+  ;; inserted via gap-insert! to be visible at the correct positions.
   (define full-text (gap-substring gb 0 (gap-length gb)))
-  (define snapshot (make-gap-buffer full-text))
+  (define snapshot (make-gap-buffer ""))
+  (gap-insert! snapshot 0 (string->bytes/utf-8 full-text))
 
   ;; Compute the extended scan region (same heuristic as sync path).
   (match-define (cons scan-start scan-end)
