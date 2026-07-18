@@ -14,8 +14,7 @@
  char-display-width
  gap-display-width
  scan-display-width
- tab-width
- cjk-ambiguous-width)  ; 终端 CJK 列宽配置
+ tab-width)
 
 ;; ============================================================
 ;; tab-width — parameterisable
@@ -23,9 +22,7 @@
 
 (define tab-width (make-parameter 8))
 
-;; cjk-ambiguous-width — Termux 等终端 CJK 只占 1 列时设为 1
-;; 标准终端 (qterminal, gnome-terminal, iTerm2) 用默认值 2
-(define cjk-ambiguous-width (make-parameter 2))
+
 
 ;; ============================================================
 ;; char-display-width — terminal column count
@@ -37,7 +34,7 @@
     [(or (< cp 32) (= cp #x7F)) -1]
     [(= cp 9) (tab-width)]
     [(zero-width? cp) 0]
-    [(wide? cp) (cjk-ambiguous-width)]
+    [(wide? cp) 2]
     [else 1]))
 
 (define (zero-width? cp)

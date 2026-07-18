@@ -1,1 +1,0 @@
-("9.2" ta6le ("0a64ef7fd5cef70d26287263c9f8e97d8149ffd1" . "7792aec34fe21e67ee59c7fa1dd4ab16d7ebb9b9") #"/home/lu96/work/editer/racket-emacs-rebuild/lang/../display/face.rkt" #"/home/lu96/work/editer/racket-emacs-rebuild/lang/define.rkt" #"/home/lu96/work/editer/racket-emacs-rebuild/lang/syntax.rkt" (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt"))

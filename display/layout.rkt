@@ -122,7 +122,7 @@
                                    (scan-display-width gb seg-start line-limit cols-left))]
                  [content     (gap-substring gb seg-start seg-end)]
                  [display-len (for/sum ([ch (in-string content)])
-                                (max 0 (char-display-width ch)))] ; respects cjk-ambiguous-width
+                                (max 0 (char-display-width ch)))]
                  [next-buf-pos (if (< line-end len) (add1 line-end) len)])
             (loop next-buf-pos
                   (add1 row)

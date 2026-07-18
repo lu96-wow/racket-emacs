@@ -1,1 +1,0 @@
-("9.2" ta6le ("45248a7dc43ff80396b2425004d049c5116a6d40" . "40a1c6e5a46dfd9d3f0219da5e2e558a74b73f99") #"/home/lu96/work/editer/racket-emacs-rebuild/kernel/data/gap.rkt" #"/home/lu96/work/editer/racket-emacs-rebuild/kernel/data/query.rkt" (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt"))
