@@ -10,19 +10,6 @@
 ;; ============================================================================
 ;; Application Only — writes to stdout via `display`
 ;; ============================================================================
-;;
-;;   terminal-flush!         — full flush (first frame or after resize)
-;;   terminal-flush-delta!    — row-by-row diff against cache
-;;
-;; ============================================================================
-;; Dependencies
-;; ============================================================================
-;;
-;;   display/vbuffer.rkt  — vbuffer cell grid
-;;   display/face.rkt     — face-cache-by-id, realized-face-ansi-bytes
-;;   kernel/data/char-width.rkt — char-display-width (for wide char skip)
-;;   platform/ansi.rkt    — format-cursor-move, format-clear-to-eol, etc.
-;; ============================================================================
 
 (require "../display/vbuffer.rkt"
          "../display/face.rkt"
@@ -40,15 +27,17 @@
 (define (terminal-flush! vb face-cache)
   (unless (vbuffer? vb)
     (raise-argument-error 'terminal-flush! "vbuffer?" vb))
-  (define cells (vbuffer-cells vb))
-  (define cols (vbuffer-cols vb))
+  (define ncols (vbuffer-ncols vb))
+  (define nrows (vbuffer-nrows vb))
   (define rows (vbuffer-rows vb))
   (define faces-by-id (and face-cache (face-cache-by-id face-cache)))
   (define out (open-output-string))
 
-  (for ([r (in-range rows)])
+  (for ([r (in-range nrows)]
+        #:when (vector-ref rows r))
     (display (format-cursor-move r 0) out)
-    (flush-row-cells! out cols cells (* r cols) faces-by-id)
+    (flush-row-cells! out ncols (vbuffer-row-cells (vector-ref rows r))
+                      faces-by-id)
     (display format-clear-to-eol out))
 
   (get-output-string out))
@@ -60,19 +49,25 @@
 (define (terminal-flush-delta! new-vb cache-vb face-cache)
   (unless (vbuffer? new-vb)
     (raise-argument-error 'terminal-flush-delta! "vbuffer?" new-vb))
-  (define new-cells (vbuffer-cells new-vb))
-  (define cols (vbuffer-cols new-vb))
-  (define rows (vbuffer-rows new-vb))
+  (define ncols (vbuffer-ncols new-vb))
+  (define nrows (vbuffer-nrows new-vb))
+  (define new-rows (vbuffer-rows new-vb))
   (define faces-by-id (and face-cache (face-cache-by-id face-cache)))
   (define out (open-output-string))
 
-  (for ([r (in-range rows)])
-    (when (or (not cache-vb)
-              (not (= cols (vbuffer-cols cache-vb)))
-              (not (= rows (vbuffer-rows cache-vb)))
+  ;; Check if dimensions changed (force full flush)
+  (define dims-changed?
+    (or (not cache-vb)
+        (not (= ncols (vbuffer-ncols cache-vb)))
+        (not (= nrows (vbuffer-nrows cache-vb)))))
+
+  (for ([r (in-range nrows)])
+    (when (or dims-changed?
               (vbuffer-row-changed? new-vb cache-vb r))
       (display (format-cursor-move r 0) out)
-      (flush-row-cells! out cols new-cells (* r cols) faces-by-id)
+      (define vr (vector-ref new-rows r))
+      (when vr
+        (flush-row-cells! out ncols (vbuffer-row-cells vr) faces-by-id))
       (display format-clear-to-eol out)))
 
   (get-output-string out))
@@ -81,15 +76,16 @@
 ;; flush-row-cells! — ANSI state machine for one row
 ;; ============================================================
 
-(define (flush-row-cells! out cols cells row-start faces-by-id)
-  ;; State machine: tracks active face-id and attributes to minimize
-  ;; ANSI escape sequences.  Only emits changes.
+(define (flush-row-cells! out ncols cells faces-by-id)
+  ;; Track active face-id and attributes to minimize ANSI overhead.
+  ;; Wide characters: when a char has width ≥ 2, the NEXT column is
+  ;; skipped (set skip?=#t) — this mirrors the renderer's column layout.
   (define active-face-id  0)
   (define active-attrs #f)
 
   (let loop ([c 0] [skip? #f])
-    (when (< c cols)
-      (define cl (vector-ref cells (+ row-start c)))
+    (when (< c ncols)
+      (define cl (vector-ref cells c))
       (if skip?
           (loop (add1 c) #f)
           (let* ([ch          (cell-ch cl)]
@@ -103,7 +99,6 @@
                  [face-changed?   (not (= new-face-id active-face-id))]
                  [attrs-changed?  (not (equal? new-syms old-syms))])
             (cond
-              ;; Face changed → reset + emit full face ANSI
               [face-changed?
                (display format-reset out)
                (when faces-by-id
@@ -118,20 +113,17 @@
                (unless (null? new-syms)
                  (define bs (attrs->bytes new-attrs))
                  (when bs (display bs out)))]
-
-              ;; Only attrs changed
               [attrs-changed?
                (set! active-attrs (if (null? new-syms) #f new-syms))
                (if (null? new-syms)
                    (display format-reset out)
                    (let ([bs (attrs->bytes new-attrs)])
                      (when bs (display bs out))))]
-
               [else (void)])
             (display ch out)
             (loop (add1 c) (>= (char-display-width ch) 2))))))
 
-  ;; Reset at end of row (so next row starts clean)
+  ;; Reset at end of row
   (when (or active-attrs (not (= active-face-id 0)))
     (display format-reset out)))
 

@@ -1,71 +1,49 @@
 #lang racket
 
-;; display/row-cache.rkt — Per-window row cache for incremental redisplay
+;; display/row-cache.rkt — Per-leaf row cache for incremental redisplay
 ;;
 ;; ============================================================================
-;; Each cached-row records which buffer byte-range produced which display
-;; glyphs (with face-ids already resolved).  When the buffer range hasn't
-;; changed, the renderer skips face resolution and directly blits from
-;; the cache — pure data composition.
+;; Each cached entry is a vbuffer-row: cells + buffer byte-range + flags.
+;; When the buffer range hasn't changed, the renderer skips face resolution
+;; and directly reuses the cached row — pure data composition.
 ;;
 ;; ============================================================================
-;; Dependencies: display/vbuffer (for blit target), zero kernel deps.
+;; Comparison
+;; ============================================================================
+;;
+;;   'exact   — same buf-start AND buf-end → cache hit, reuse row
+;;   'shifted — same buf-start, different buf-end → must re-render
+;;   'stale   — different buf-start → must re-render
+;;
+;; ============================================================================
+;; Dependencies: display/vbuffer (vbuffer-row struct)
 ;; ============================================================================
 
-(require "vbuffer.rkt"
-         "../kernel/data/char-width.rkt")
+(require "vbuffer.rkt")
 
 (provide
- ;; ── glyph — pre-resolved display element ──
- glyph? glyph glyph-ch glyph-width glyph-face-id
-
- ;; ── cached-row — buffer range → display glyphs ──
- cached-row? cached-row-buf-start cached-row-buf-end
- cached-row-glyphs cached-row-continued? cached-row-truncated?
-
- ;; ── row-cache — per-leaf vector ──
+ ;; ── row-cache ──
  row-cache? make-row-cache
  row-cache-rows row-cache-nrows
 
  ;; ── queries (pure) ──
  row-cache-compare      ;; cache × idx × buf-start × buf-end → 'exact|'shifted|'stale
- row-cache-valid-row?    ;; cache × idx → boolean?
+ row-cache-cached-row   ;; cache × idx → vbuffer-row? | #f
 
- ;; ── mutations (in-place for performance) ──
- row-cache-update!
- row-cache-invalidate!
- row-cache-clear-from!
+ ;; ── mutations ──
+ row-cache-store!       ;; cache × idx × vbuffer-row? → void
+ row-cache-invalidate!  ;; cache → void
+ row-cache-clear-from!  ;; cache × idx → void
 
- ;; ── blit (cache → vbuffer, pure output) ──
- row-cache-blit-row!)
-
-;; ============================================================
-;; Glyph — one pre-resolved display cell
-;; ============================================================
-
-(struct glyph (ch width face-id) #:transparent)
-;; ch     — char? what to display
-;; width  — exact-positive-integer? columns occupied (1 or 2)
-;; face-id — exact-nonnegative-integer? resolved face index
+ ;; ── blit (cached row → vbuffer) ──
+ row-cache-blit-row!)    ;; vb × row × cache × idx → void
 
 ;; ============================================================
-;; Cached row — buffer range → glyph vector
-;; ============================================================
-
-(struct cached-row
-  (buf-start     ; byte-pos — first byte of this display row
-   buf-end       ; byte-pos — first byte after this row (exclusive)
-   glyphs        ; (vectorof glyph?)
-   continued?    ; boolean? — wrapped continuation?
-   truncated?)   ; boolean? — was a '$' appended?
-  #:transparent)
-
-;; ============================================================
-;; Row cache — mutable vector of cached-row
+;; Row cache — mutable vector of vbuffer-row?
 ;; ============================================================
 
 (struct row-cache
-  ([rows #:mutable]   ; (vectorof (or/c cached-row? #f))
+  ([rows #:mutable]   ; (vectorof (or/c vbuffer-row? #f))
    [nrows #:mutable]) ; number of valid (non-#f) rows
   #:transparent)
 
@@ -75,49 +53,42 @@
   (row-cache (make-vector max-rows #f) 0))
 
 ;; ============================================================
-;; row-cache-compare — is cached row still valid?
+;; row-cache-compare
 ;; ============================================================
 
 (define (row-cache-compare cache row-idx buf-start buf-end)
-  ;; Compare cache[row] against current buffer range.
-  ;; Returns: 'exact | 'shifted | 'stale
   (define rows (row-cache-rows cache))
   (cond [(>= row-idx (vector-length rows)) 'stale]
         [else
          (define cr (vector-ref rows row-idx))
          (cond [(not cr) 'stale]
-               [(= (cached-row-buf-start cr) buf-start)
-                (if (= (cached-row-buf-end cr) buf-end)
+               [(= (vbuffer-row-buf-start cr) buf-start)
+                (if (= (vbuffer-row-buf-end cr) buf-end)
                     'exact
                     'shifted)]
                [else 'stale])]))
 
-;; ============================================================
-;; row-cache-valid-row?
-;; ============================================================
-
-(define (row-cache-valid-row? cache row-idx)
+(define (row-cache-cached-row cache row-idx)
   (define rows (row-cache-rows cache))
   (and (< row-idx (vector-length rows))
-       (vector-ref rows row-idx)
-       #t))
+       (vector-ref rows row-idx)))
 
 ;; ============================================================
-;; row-cache-update!
+;; row-cache-store!
 ;; ============================================================
 
-(define (row-cache-update! cache row-idx buf-start buf-end glyphs
-                          [continued? #f] [truncated? #f])
+(define (row-cache-store! cache row-idx vrow)
+  (unless (vbuffer-row? vrow)
+    (raise-argument-error 'row-cache-store! "vbuffer-row?" vrow))
   (define rows (row-cache-rows cache))
   (when (>= row-idx (vector-length rows))
-    (error 'row-cache-update! "row index out of bounds: ~a >= ~a"
+    (error 'row-cache-store! "row index out of bounds: ~a >= ~a"
            row-idx (vector-length rows)))
-  (vector-set! rows row-idx
-    (cached-row buf-start buf-end glyphs continued? truncated?))
+  (vector-set! rows row-idx vrow)
   (set-row-cache-nrows! cache (max (row-cache-nrows cache) (add1 row-idx))))
 
 ;; ============================================================
-;; row-cache-invalidate!
+;; row-cache-invalidate! / row-cache-clear-from!
 ;; ============================================================
 
 (define (row-cache-invalidate! cache)
@@ -126,10 +97,6 @@
     (vector-set! rows i #f))
   (set-row-cache-nrows! cache 0))
 
-;; ============================================================
-;; row-cache-clear-from!
-;; ============================================================
-
 (define (row-cache-clear-from! cache row-idx)
   (define rows (row-cache-rows cache))
   (for ([i (in-range row-idx (vector-length rows))])
@@ -137,29 +104,11 @@
   (set-row-cache-nrows! cache (min (row-cache-nrows cache) row-idx)))
 
 ;; ============================================================
-;; row-cache-blit-row! — write cached glyphs into vbuffer
+;; row-cache-blit-row! — write cached vbuffer-row into vbuffer
 ;; ============================================================
 
 (define (row-cache-blit-row! vb row cache row-idx)
-  ;; Pure output: reads cache, writes vb cells.
-  ;; Handles wide-char skip.  Appends '$' if truncated.
-  (define rows (row-cache-rows cache))
-  (define cr (and (< row-idx (vector-length rows))
-                  (vector-ref rows row-idx)))
+  (define cr (row-cache-cached-row cache row-idx))
   (when cr
-    (define glyphs (cached-row-glyphs cr))
-    (define max-col (vbuffer-cols vb))
-    (let loop ([c 0] [g 0] [skip? #f])
-      (when (and (< c max-col) (< g (vector-length glyphs)))
-        (define gv (vector-ref glyphs g))
-        (if skip?
-            (loop (add1 c) (add1 g) #f)
-            (begin
-              (vbuffer-put-char! vb row c (glyph-ch gv)
-                                 #:face-id (glyph-face-id gv))
-              (loop (+ c (glyph-width gv))
-                    (add1 g)
-                    (= (glyph-width gv) 2))))))
-    (when (cached-row-truncated? cr)
-      (vbuffer-put-char! vb row (sub1 max-col) #\$)))
+    (vector-set! (vbuffer-rows vb) row cr))
   vb)

@@ -1,11 +1,23 @@
 #lang racket
 
-;; display/render.rkt — layout + gap face-ids → vbuffer
+;; display/render.rkt — layout + gap face-ids → vbuffer window
 ;;
 ;; ============================================================================
 ;; Pure computation: walks layout visual-lines, reads face-ids directly
-;; from the gap buffer (colocated with text), fills a vbuffer.
-;; No terminal output, no ANSI, no text-properties involved.
+;; from the gap buffer (colocated with text), produces a vbuffer with
+;; per-row buffer byte-range metadata.  No terminal output, no ANSI.
+;;
+;; ============================================================================
+;; Data Flow
+;; ============================================================================
+;;
+;;   gap-buffer (bytes + faces)  ─┐
+;;   layout (visual-lines)       ─┤
+;;   face-cache (region merge)   ─┤
+;;                                ├─→ render-visual-line! → vbuffer-row
+;;                                │    (cells + buf-start/end + flags)
+;;                                │
+;;                                └─→ vbuffer (screen grid + gap ref)
 ;;
 ;; ============================================================================
 ;; Computation vs Application
@@ -15,34 +27,22 @@
 ;;     render-layout!  render-layout/region!
 ;;     render-layout/cached!  render-layout/region/cached!
 ;;
-;;   The render is PURE — it reads from immutable layout and gap-buffer
-;;   (face-ids are read-only during render).  The only "mutation" is
-;;   writing to the freshly-allocated vbuffer, which is isolated.
+;;   The result vbuffer carries a reference to the gap-buffer for
+;;   screen↔buffer position queries (vbuffer-xy->byte-pos, etc.).
 ;;
 ;; ============================================================================
-;; Face-Id Resolution
+;; UTF-8 Handling
 ;; ============================================================================
 ;;
-;;   Face-ids are stored in the gap buffer directly (kernel/data/face.rkt).
-;;   face-id 0 = default (no highlighting).
-;;   face-id 1..N = registered faces (font-lock, bracket depths, etc.).
+;;   Wide characters (CJK, emoji): face-id from first byte, stored at
+;;   column C with width=2.  Column C+1 gets a space with fid=0 as
+;;   a skip marker.  vbuffer-xy->byte-pos correctly maps both columns
+;;   to the same buffer byte.
 ;;
-;;   For region highlighting: the base face-id from the gap is merged with
-;;   the region overlay face-id via face-cache.  Merged face-ids are cached
-;;   per (base-fid . overlay-fid) pair for performance.
+;;   Combining characters (width=0): stored at column C+1 (advance by 1).
+;;   The base character stays at column C.  Terminal rendering limitation
+;;   — proper grapheme cluster composition needs a shaping engine.
 ;;
-;; ============================================================================
-;; Dependencies
-;; ============================================================================
-;;
-;;   kernel/data/gap.rkt        — gap-buffer? and gap accessors
-;;   kernel/data/query.rkt      — gap-char, gap-next-char-pos
-;;   kernel/data/face.rkt       — face-ref (O(1) face-id lookup)
-;;   kernel/data/char-width.rkt — char-display-width
-;;   display/vbuffer.rkt        — vbuffer cell grid
-;;   display/layout.rkt         — layout, visual-line
-;;   display/face.rkt           — face-cache, face-id-with-overlay-id
-;;   display/row-cache.rkt      — incremental redisplay caching
 ;; ============================================================================
 
 (require "../kernel/data/gap.rkt"
@@ -55,35 +55,36 @@
          "row-cache.rkt")
 
 (provide
- ;; ── without cache (always full render) ──
+ ;; ── full render ──
  render-layout!
  render-layout/region!
 
- ;; ── with row-cache (incremental where possible) ──
+ ;; ── incremental render (with row-cache) ──
  render-layout/cached!
  render-layout/region/cached!)
 
 ;; ============================================================
-;; render-layout! — fill vbuffer from a layout (full render)
+;; render-layout! — fill vbuffer from layout (full render)
 ;; ============================================================
 
 (define (render-layout! ly gb face-cache)
-  ;; Returns a fresh vbuffer.  Face-ids are read directly from gap-buffer.
-  ;; No text-properties involved.
   (unless (layout? ly)
     (raise-argument-error 'render-layout! "layout?" ly))
-  (unless (gap-buffer? gb)
-    (raise-argument-error 'render-layout! "gap-buffer?" gb))
   (define rows (layout-max-rows ly))
   (define cols (layout-max-cols ly))
-  (define vb  (make-vbuffer rows cols))
+  (define vb  (make-vbuffer rows cols gb))
 
   (for ([vl  (in-list (layout-lines ly))]
         [row (in-naturals)]
         #:when (< row rows))
-    (define-values (_vb _glyphs)
-      (render-visual-line! vb row 0 vl gb face-cache #f #f))
-    (void))
+    (define vrow (render-visual-line! vl cols gb face-cache #f #f))
+    (vbuffer-fill-row! vb row
+                       (vbuffer-row-cells vrow)
+                       (vbuffer-row-buf-start vrow)
+                       (vbuffer-row-buf-end vrow)
+                       (vbuffer-row-continued? vrow)
+                       (vbuffer-row-truncated? vrow)
+                       (vbuffer-row-display-len vrow)))
   vb)
 
 ;; ============================================================
@@ -91,20 +92,22 @@
 ;; ============================================================
 
 (define (render-layout/region! ly gb face-cache region-beg region-end)
-  ;; Like render-layout! but with active region highlighting.
-  (unless (layout? ly)
-    (raise-argument-error 'render-layout/region! "layout?" ly))
   (define rows (layout-max-rows ly))
   (define cols (layout-max-cols ly))
-  (define vb  (make-vbuffer rows cols))
+  (define vb  (make-vbuffer rows cols gb))
 
   (for ([vl  (in-list (layout-lines ly))]
         [row (in-naturals)]
         #:when (< row rows))
-    (define-values (_vb _glyphs)
-      (render-visual-line! vb row 0 vl gb face-cache
-                           region-beg region-end))
-    (void))
+    (define vrow (render-visual-line! vl cols gb face-cache
+                                       region-beg region-end))
+    (vbuffer-fill-row! vb row
+                       (vbuffer-row-cells vrow)
+                       (vbuffer-row-buf-start vrow)
+                       (vbuffer-row-buf-end vrow)
+                       (vbuffer-row-continued? vrow)
+                       (vbuffer-row-truncated? vrow)
+                       (vbuffer-row-display-len vrow)))
   vb)
 
 ;; ============================================================
@@ -112,14 +115,11 @@
 ;; ============================================================
 
 (define (render-layout/cached! ly gb face-cache row-cache)
-  ;; Like render-layout! but uses row-cache for incremental redisplay.
-  ;; On cache hit ('exact), skips face resolution and blits directly.
-  ;; Returns vb; row-cache is mutated in-place.
   (define rows (layout-max-rows ly))
   (define cols (layout-max-cols ly))
-  (define vb  (make-vbuffer rows cols))
-
+  (define vb  (make-vbuffer rows cols gb))
   (define vlines (layout-lines ly))
+
   (for ([vl  (in-list vlines)]
         [row (in-naturals)]
         #:when (< row rows))
@@ -129,13 +129,16 @@
       ['exact
        (row-cache-blit-row! vb row row-cache row)]
       [_  ;; 'shifted or 'stale — full render + update cache
-       (define-values (_vb _glyphs)
-         (render-visual-line! vb row 0 vl gb face-cache #f #f))
-       (row-cache-update! row-cache row buf-start buf-end _glyphs
-                          (visual-line-continued? vl)
-                          (visual-line-truncated? vl))]))
+       (define vrow (render-visual-line! vl cols gb face-cache #f #f))
+       (vbuffer-fill-row! vb row
+                          (vbuffer-row-cells vrow)
+                          (vbuffer-row-buf-start vrow)
+                          (vbuffer-row-buf-end vrow)
+                          (vbuffer-row-continued? vrow)
+                          (vbuffer-row-truncated? vrow)
+                          (vbuffer-row-display-len vrow))
+       (row-cache-store! row-cache row vrow)]))
 
-  ;; Clear stale cache rows beyond current layout
   (row-cache-clear-from! row-cache (length vlines))
   vb)
 
@@ -147,9 +150,9 @@
                                        region-beg region-end row-cache)
   (define rows (layout-max-rows ly))
   (define cols (layout-max-cols ly))
-  (define vb  (make-vbuffer rows cols))
-
+  (define vb  (make-vbuffer rows cols gb))
   (define vlines (layout-lines ly))
+
   (for ([vl  (in-list vlines)]
         [row (in-naturals)]
         #:when (< row rows))
@@ -159,69 +162,55 @@
       ['exact
        (row-cache-blit-row! vb row row-cache row)]
       [_
-       (define-values (_vb _glyphs)
-         (render-visual-line! vb row 0 vl gb face-cache
-                              region-beg region-end))
-       (row-cache-update! row-cache row buf-start buf-end _glyphs
-                          (visual-line-continued? vl)
-                          (visual-line-truncated? vl))]))
+       (define vrow (render-visual-line! vl cols gb face-cache
+                                          region-beg region-end))
+       (vbuffer-fill-row! vb row
+                          (vbuffer-row-cells vrow)
+                          (vbuffer-row-buf-start vrow)
+                          (vbuffer-row-buf-end vrow)
+                          (vbuffer-row-continued? vrow)
+                          (vbuffer-row-truncated? vrow)
+                          (vbuffer-row-display-len vrow))
+       (row-cache-store! row-cache row vrow)]))
 
   (row-cache-clear-from! row-cache (length vlines))
   vb)
 
 ;; ============================================================
-;; render-visual-line! — one visual-line → one vbuffer row
+;; render-visual-line! — one visual-line → vbuffer-row
 ;; ============================================================
 
-(define (render-visual-line! vb row start-col vl gb
-                             face-cache region-beg region-end)
-  ;; Fill one vbuffer row from a visual-line.
-  ;; Returns (values vb glyphs) where glyphs is (vectorof glyph?) for caching.
-  ;;
-  ;; Face-id resolution:
-  ;;   1. Read base face-id from gap buffer: (face-ref gb byte-pos)
-  ;;      face-id 0 = default, 1..255 = registered faces
-  ;;   2. If position is in active region, merge with region overlay face-id
-  ;;      via face-id-with-overlay-id.
-  ;;   3. Cache merged face-ids per (base-fid . overlay-fid) pair.
+(define (render-visual-line! vl ncols gb face-cache region-beg region-end)
+  ;; Fill one screen row.  Returns a vbuffer-row with cells + byte-range.
   (define content     (visual-line-content vl))
   (define buf-pos     (visual-line-buf-pos vl))
+  (define buf-end     (visual-line-end-buf-pos vl))
+  (define continued?  (visual-line-continued? vl))
   (define truncated?  (visual-line-truncated? vl))
-  (define max-cols    (vbuffer-cols vb))
+  (define display-len (visual-line-display-len vl))
   (define gap-len     (gap-length gb))
 
-  ;; Pre-resolve region overlay face-id (once per visual-line)
+  ;; Pre-resolve region overlay face-id (once per row)
   (define region-fid
     (and face-cache region-beg region-end
          (< region-beg region-end)
-         (face-id-for-name 'region face-cache)))
+         (face-id-for-name (quote region) face-cache)))
 
   ;; Cache: (base-fid . overlay-fid) → merged-fid
   (define merge-cache (make-hash))
 
-  ;; Collect glyphs for row-cache (reversed, then reversed at end)
-  (define glyphs-rev '())
+  ;; Build cells vector
+  (define cells (make-vector ncols (cell #\space #f 0)))
 
-  (let loop ([col      start-col]
-             [char-idx 0]
-             [byte-pos buf-pos])
-    (when (< char-idx (string-length content))
+  (let loop ([col 0] [char-idx 0] [byte-pos buf-pos])
+    (when (and (< char-idx (string-length content)) (< col ncols))
       (define ch (string-ref content char-idx))
 
-      ;; ── Face-id resolution ──
-      ;; Read base face-id directly from gap buffer.
-      (define base-fid
-        (if (< byte-pos gap-len)
-            (face-ref gb byte-pos)
-            0))
-
-      ;; Check if this byte is in the active region.
-      (define in-region?
-        (and region-fid
-             (>= byte-pos region-beg)
-             (<  byte-pos region-end)))
-
-      ;; Resolve final face-id: merge base + overlay if in region.
+      ;; Face-id resolution
+      (define base-fid (if (< byte-pos gap-len) (face-ref gb byte-pos) 0))
+      (define in-region? (and region-fid
+                              (>= byte-pos region-beg)
+                              (< byte-pos region-end)))
       (define fid
         (cond [(not in-region?) base-fid]
               [(zero? region-fid) base-fid]
@@ -229,65 +218,48 @@
               [else
                (define key (cons base-fid region-fid))
                (hash-ref! merge-cache key
-                 (λ ()
-                   (face-id-with-overlay-id
-                    base-fid region-fid face-cache)))]))
-      ;; ── End face-id resolution ──
+                          (λ ()
+                            (face-id-with-overlay-id
+                             base-fid region-fid face-cache)))]))
 
-      ;; Character display width
       (define cw (max 0 (char-display-width ch)))
 
-      ;; ── Character rendering ──
+      ;; Character rendering dispatch
       (cond
-        ;; Tab → spaces
         [(char=? ch #\tab)
-         (define tab-w (tab-width))
-         (let fill-tab ([c col] [n tab-w])
-           (when (and (< c max-cols) (> n 0))
-             (vbuffer-put-char! vb row c #\space #:face-id fid)
-             (set! glyphs-rev (cons (glyph #\space 1 fid) glyphs-rev))
-             (fill-tab (add1 c) (sub1 n))))
-         (loop (+ col tab-w)
-               (add1 char-idx)
-               (gap-next-char-pos gb byte-pos))]
+         (let* ([tab-w (tab-width)]
+                [end-col (min ncols (+ col tab-w))])
+           (for ([c (in-range col end-col)])
+             (vector-set! cells c (cell #\space #f fid)))
+           (loop end-col (add1 char-idx)
+                 (gap-next-char-pos gb byte-pos)))]
 
-        ;; Control characters → ^X representation
         [(< (char->integer ch) 32)
-         (when (< col max-cols)
-           (vbuffer-put-char! vb row col #\^ #:face-id fid)
-           (set! glyphs-rev (cons (glyph #\^ 1 fid) glyphs-rev)))
-         (when (< (add1 col) max-cols)
-           (define ctrl-ch (integer->char (+ 64 (char->integer ch))))
-           (vbuffer-put-char! vb row (add1 col) ctrl-ch #:face-id fid)
-           (set! glyphs-rev (cons (glyph ctrl-ch 1 fid) glyphs-rev)))
-         (loop (+ col 2)
-               (add1 char-idx)
+         (when (< col ncols)
+           (vector-set! cells col (cell #\^ #f fid)))
+         (when (< (add1 col) ncols)
+           (let ([ctrl-ch (integer->char (+ 64 (char->integer ch)))])
+             (vector-set! cells (add1 col) (cell ctrl-ch #f fid))))
+         (loop (+ col 2) (add1 char-idx)
                (gap-next-char-pos gb byte-pos))]
 
-        ;; DEL character → ^?
         [(char=? ch #\rubout)
-         (when (< col max-cols)
-           (vbuffer-put-char! vb row col #\^ #:face-id fid)
-           (set! glyphs-rev (cons (glyph #\^ 1 fid) glyphs-rev)))
-         (when (< (add1 col) max-cols)
-           (vbuffer-put-char! vb row (add1 col) #\? #:face-id fid)
-           (set! glyphs-rev (cons (glyph #\? 1 fid) glyphs-rev)))
-         (loop (+ col 2)
-               (add1 char-idx)
+         (when (< col ncols)
+           (vector-set! cells col (cell #\^ #f fid)))
+         (when (< (add1 col) ncols)
+           (vector-set! cells (add1 col) (cell #\? #f fid)))
+         (loop (+ col 2) (add1 char-idx)
                (gap-next-char-pos gb byte-pos))]
 
-        ;; Normal character
         [else
-         (when (< col max-cols)
-           (vbuffer-put-char! vb row col ch #:face-id fid))
-         (set! glyphs-rev (cons (glyph ch cw fid) glyphs-rev))
-         ;; Skip extra column for wide chars (display-width ≥ 2)
-         (loop (+ col (if (>= cw 2) 2 1))
-               (add1 char-idx)
-               (gap-next-char-pos gb byte-pos))])))
+         (when (< col ncols)
+           (vector-set! cells col (cell ch #f fid)))
+         (let ([advance (if (>= cw 2) 2 1)])
+           (loop (+ col advance) (add1 char-idx)
+                 (gap-next-char-pos gb byte-pos)))])))
 
-  ;; Truncation marker '$'
-  (when (and truncated? (> max-cols 0))
-    (vbuffer-put-char! vb row (sub1 max-cols) #\$))
+  ;; Truncation marker
+  (when (and truncated? (> ncols 0))
+    (vector-set! cells (sub1 ncols) (cell #\$ #f 0)))
 
-  (values vb (list->vector (reverse glyphs-rev))))
+  (vbuffer-row cells buf-pos buf-end continued? truncated? display-len))
