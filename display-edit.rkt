@@ -17,8 +17,7 @@
          "kernel/dirty.rkt"
          "kernel/buffer.rkt"
          "kernel/data/text.rkt"
-         "kernel/data/marker.rkt"
-         "lang/font-lock.rkt")
+         "kernel/data/marker.rkt")
 
 (provide redisplay! redisplay-init! invalidate-leaf-caches!)
 
@@ -100,18 +99,8 @@
 ;; ── Pipeline ──
 (define (redisplay! db frm fc leaf-caches cache-vb
                     #:content-changed? [content? #f]
-                    #:frame-changed?  [frame?  #f]
-                    #:syntax-table    [st   #f]
-                    #:font-locker     [fl   #f])
+                    #:frame-changed?  [frame?  #f])
   (define db1 (if (and content? (dirty-dirty? db)) (dirty-commit! db) db))
-  ;; Font-lock syntax highlighting
-  (when (and fl (dirty-dirty? db1))
-    (define chg (dirty-change db1))
-    (when chg
-      (define buf (dirty-buffer-buf db1))
-      (define gb  (text-gap (buffer-text buf)))
-      (font-lock-update! fl gb (car chg) (cdr chg)))
-    (invalidate-leaf-caches! leaf-caches))
   (when frame? (layout-frame! frm) (invalidate-leaf-caches! leaf-caches))
   (define db2 (dirty-clear! db1))
   (define scrolled? (sync-viewport! frm leaf-caches))

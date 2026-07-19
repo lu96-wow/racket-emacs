@@ -294,18 +294,31 @@
                     (vector-ref src-rows sr)))
     (define dr (+ dst-top sr))
     (define svr (vector-ref src-rows sr))
-    (define new-cells (make-vector dst-ncols (cell #\space #f 0)))
+    ;; Merge into existing row cells if present (horizontal split),
+    ;; otherwise start fresh (vertical split or first leaf).
+    (define cur (vector-ref dst-rows dr))
+    (define base-cells
+      (if cur
+          (vector-copy (vbuffer-row-cells cur))
+          (make-vector dst-ncols (cell #\space #f 0))))
     (define scells (vbuffer-row-cells svr))
     (for ([sc (in-range src-ncols)]
           #:when (< (+ dst-left sc) dst-ncols))
-      (vector-set! new-cells (+ dst-left sc) (vector-ref scells sc)))
+      (vector-set! base-cells (+ dst-left sc) (vector-ref scells sc)))
+    ;; Prefer first-blit leaf's metadata for screen→buffer mapping
+    (define meta-start (if cur (vbuffer-row-buf-start cur)
+                            (vbuffer-row-buf-start svr)))
+    (define meta-end   (if cur (vbuffer-row-buf-end cur)
+                            (vbuffer-row-buf-end svr)))
+    (define meta-cont  (or (and cur (vbuffer-row-continued? cur))
+                           (vbuffer-row-continued? svr)))
+    (define meta-trun  (or (and cur (vbuffer-row-truncated? cur))
+                           (vbuffer-row-truncated? svr)))
+    (define meta-dlen  (max (if cur (vbuffer-row-display-len cur) 0)
+                            (+ dst-left (vbuffer-row-display-len svr))))
     (vector-set! dst-rows dr
-      (vbuffer-row new-cells
-                   (vbuffer-row-buf-start svr)
-                   (vbuffer-row-buf-end svr)
-                   (vbuffer-row-continued? svr)
-                   (vbuffer-row-truncated? svr)
-                   (vbuffer-row-display-len svr)))))
+      (vbuffer-row base-cells
+                   meta-start meta-end meta-cont meta-trun meta-dlen))))
 
 ;; ============================================================
 ;; Serialization

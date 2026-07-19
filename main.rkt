@@ -10,7 +10,6 @@
          "kernel/buffer.rkt"
          "kernel/dirty.rkt"
          "kernel/data/text.rkt"
-         "kernel/data/syntax.rkt"
          "lang/font-lock.rkt"
          "edit.rkt"
          "input/key.rkt"
@@ -26,7 +25,7 @@
    "      n\n"
    "      (+ (fib (- n 1)) (fib (- n 2)))))\n"
    "\n"
-   ";; Try typing: C-f/b C-n/p C-a/e C-k C-y C-z/x\n"))
+   ";; Try typing: C-f/b C-n/p C-a/e C-k C-y C-z/x C-v/s C-o\n"))
 
 (define (edit db frm fn)  (values (fn db) frm #t))
 (define (move db frm fn)  (values (fn db) frm #f))
@@ -59,6 +58,7 @@
    (cons (key-ctrl #\z) (edit-cmd cmd-undo))
    (cons (key-ctrl #\x) (edit-cmd cmd-redo))
    (cons (key-ctrl #\v) (window-cmd (λ (f) (frame-split-leaf! f 'vertical) f)))
+   (cons (key-ctrl #\s) (window-cmd (λ (f) (frame-split-leaf! f 'horizontal) f)))
    (cons (key-ctrl #\o) (window-cmd (λ (f) (frame-select-next! f) f)))
    (cons (key-sym 'resize) (window-cmd (λ (f)
                              (detect-terminal-size!)
@@ -86,7 +86,6 @@
       (for ([spec (in-list font-lock-face-specs)])
         (match-define (list name kvs ...) spec)
         (define-face! name (apply make-face-attrs kvs)))
-      (define racket-st (make-racket-syntax-table))
       (define fl  (make-font-locker (λ (name) (face-id-for-name name fc))))
       ;; Initial full color scan
       (font-lock-scan-range! fl (text-gap (buffer-text buf)) 0 (buffer-length buf))
@@ -107,20 +106,26 @@
            (define f (frame-resize frm (terminal-width) (terminal-height)))
            (define-values (d _ vb cs)
              (redisplay! db f fc caches cache-vb
-                         #:frame-changed? #t
-                         #:syntax-table racket-st))
+                         #:frame-changed? #t))
            (loop d f vb cs fl)]
           [else
            (define-values (d f a?)
              (if (key-paste? ke)
                  (values (cmd-paste db (key-paste-text ke)) frm #t)
                  (dispatch-key global-keymap db frm ke cmd-self-insert)))
+           ;; lang layer: font-lock before display
+           (define d1 (if (and a? (dirty-dirty? d)) (dirty-commit! d) d))
+           (when (and (dirty-dirty? d1))
+             (define chg (dirty-change d1))
+             (when chg
+               (define gb (text-gap (buffer-text (dirty-buffer-buf d1))))
+               (font-lock-update! fl gb (car chg) (cdr chg)))
+             (invalidate-leaf-caches! caches))
+           ;; display layer: render
            (define-values (db2 frm2 vb2 cs2)
-             (redisplay! d f fc caches cache-vb
+             (redisplay! d1 f fc caches cache-vb
                          #:content-changed? a?
-                         #:frame-changed? (and a? (not (eq? frm f)))
-                         #:syntax-table racket-st
-                         #:font-locker fl))
+                         #:frame-changed? (and a? (not (eq? frm f)))))
            (loop db2 frm2 vb2 cs2 fl)])))
     (λ ()
       (display format-cursor-show)
