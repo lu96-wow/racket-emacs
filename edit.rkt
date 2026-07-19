@@ -28,14 +28,14 @@
 ;; ============================================================================
 ;;
 ;;   (or (guard-read-only db)     ;; returns db (truthy) if read-only
-;;       (base:cmd-fn db ...))    ;; otherwise execute the command
+;;       (base-cmd-fn db ...))    ;; otherwise execute the command
 ;;
 ;;   When read-only: `or` short-circuits → returns original db (no-op)
 ;;   When writable:  guard returns #f → `or` evaluates command → new db
 ;;
 ;; ============================================================================
 
-(require (prefix-in base: "kernel/base-edit.rkt")
+(require (prefix-in base- "kernel/base-edit.rkt")
          "kernel/motion.rkt"
          "kernel/data/syntax.rkt"
          "kernel/data/text.rkt"
@@ -61,75 +61,75 @@
 
 (define (cmd-self-insert db ch)
   (or (guard-read-only db)
-      (base:cmd-self-insert db ch)))
+      (base-cmd-self-insert db ch)))
 
 (define (cmd-newline db)
   (or (guard-read-only db)
-      (base:cmd-newline db)))
+      (base-cmd-newline db)))
 
 (define (cmd-tab db)
   (or (guard-read-only db)
-      (base:cmd-tab db)))
+      (base-cmd-tab db)))
 
 (define (cmd-backward-delete db)
   (or (guard-read-only db)
-      (base:cmd-backward-delete db)))
+      (base-cmd-backward-delete db)))
 
 (define (cmd-forward-delete db)
   (or (guard-read-only db)
-      (base:cmd-forward-delete db)))
+      (base-cmd-forward-delete db)))
 
 (define (cmd-kill-line db)
   (or (guard-read-only db)
-      (base:cmd-kill-line db)))
+      (base-cmd-kill-line db)))
 
 (define (cmd-kill-region db)
   ;; Kill (cut) the active region to kill-ring.
   (or (guard-read-only db)
-      (base:cmd-kill-region db)))
+      (base-cmd-kill-region db)))
 
 (define (cmd-delete-region db)
   ;; Delete the active region without pushing to kill-ring.
   (or (guard-read-only db)
-      (base:cmd-delete-region db)))
+      (base-cmd-delete-region db)))
 
 (define (cmd-copy-region db)
   ;; Copy the active region to kill-ring without deleting.
   (or (guard-read-only db)
-      (base:cmd-copy-region db)))
+      (base-cmd-copy-region db)))
 
 (define (cmd-yank db)
   (or (guard-read-only db)
-      (base:cmd-yank db)))
+      (base-cmd-yank db)))
 
 (define (cmd-yank-pop db)
   (or (guard-read-only db)
-      (base:cmd-yank-pop db)))
+      (base-cmd-yank-pop db)))
 
 (define (cmd-undo db)
   (or (guard-read-only db)
-      (base:cmd-undo db)))
+      (base-cmd-undo db)))
 
 (define (cmd-redo db)
   (or (guard-read-only db)
-      (base:cmd-redo db)))
+      (base-cmd-redo db)))
 
 ;; ============================================================
 ;; Non-Mutating Commands — direct pass-through (no guard needed)
 ;; ============================================================
 
-(define cmd-forward-char      base:cmd-forward-char)
-(define cmd-backward-char     base:cmd-backward-char)
-(define cmd-beginning-of-line base:cmd-beginning-of-line)
-(define cmd-end-of-line       base:cmd-end-of-line)
-(define cmd-next-line         base:cmd-next-line)
-(define cmd-prev-line         base:cmd-prev-line)
-(define line-beginning        base:line-beginning)
-(define line-end              base:line-end)
-(define display-column        base:display-column)
-(define move-to-column        base:move-to-column)
-(define cmd-set-mark          base:cmd-set-mark)
-(define cmd-swap-point-and-mark base:cmd-swap-point-and-mark)
+(define cmd-forward-char      base-cmd-forward-char)
+(define cmd-backward-char     base-cmd-backward-char)
+(define cmd-beginning-of-line base-cmd-beginning-of-line)
+(define cmd-end-of-line       base-cmd-end-of-line)
+(define cmd-next-line         base-cmd-next-line)
+(define cmd-prev-line         base-cmd-prev-line)
+(define line-beginning        base-line-beginning)
+(define line-end              base-line-end)
+(define display-column        base-display-column)
+(define move-to-column        base-move-to-column)
+(define cmd-set-mark          base-cmd-set-mark)
+(define cmd-swap-point-and-mark base-cmd-swap-point-and-mark)
 
 ;; ============================================================
 ;; Unchecked Variants — for internal writes to read-only buffers
@@ -137,19 +137,19 @@
 ;; Used by error buffer, log buffer, display buffer, etc.
 ;; Same signatures as guarded versions, without the guard.
 
-(define cmd-self-insert/unchecked    base:cmd-self-insert)
-(define cmd-newline/unchecked        base:cmd-newline)
-(define cmd-tab/unchecked            base:cmd-tab)
-(define cmd-backward-delete/unchecked base:cmd-backward-delete)
-(define cmd-forward-delete/unchecked  base:cmd-forward-delete)
-(define cmd-kill-line/unchecked      base:cmd-kill-line)
-(define cmd-kill-region/unchecked    base:cmd-kill-region)
-(define cmd-delete-region/unchecked  base:cmd-delete-region)
-(define cmd-copy-region/unchecked    base:cmd-copy-region)
-(define cmd-yank/unchecked           base:cmd-yank)
-(define cmd-yank-pop/unchecked       base:cmd-yank-pop)
-(define cmd-undo/unchecked           base:cmd-undo)
-(define cmd-redo/unchecked           base:cmd-redo)
+(define cmd-self-insert/unchecked    base-cmd-self-insert)
+(define cmd-newline/unchecked        base-cmd-newline)
+(define cmd-tab/unchecked            base-cmd-tab)
+(define cmd-backward-delete/unchecked base-cmd-backward-delete)
+(define cmd-forward-delete/unchecked  base-cmd-forward-delete)
+(define cmd-kill-line/unchecked      base-cmd-kill-line)
+(define cmd-kill-region/unchecked    base-cmd-kill-region)
+(define cmd-delete-region/unchecked  base-cmd-delete-region)
+(define cmd-copy-region/unchecked    base-cmd-copy-region)
+(define cmd-yank/unchecked           base-cmd-yank)
+(define cmd-yank-pop/unchecked       base-cmd-yank-pop)
+(define cmd-undo/unchecked           base-cmd-undo)
+(define cmd-redo/unchecked           base-cmd-redo)
 
 ;; ============================================================
 ;; Syntax-Driven Movement — no guard needed (non-mutating)
