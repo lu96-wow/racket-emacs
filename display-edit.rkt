@@ -110,7 +110,8 @@
     (when chg
       (define buf (dirty-buffer-buf db1))
       (define gb  (text-gap (buffer-text buf)))
-      (bracket-colorer-update! bkt gb st (car chg) (cdr chg))))
+      (bracket-colorer-update! bkt gb st (car chg) (cdr chg)))
+    (invalidate-leaf-caches! leaf-caches))
   (when frame? (layout-frame! frm) (invalidate-leaf-caches! leaf-caches))
   (define db2 (dirty-clear! db1))
   (define scrolled? (sync-viewport! frm leaf-caches))

@@ -392,7 +392,7 @@
           (let ([prev-nl (gap-scan-byte gb (sub1 pos) 'backward
                                         (λ (b) (= b #x0A)))])
             (if (>= prev-nl 0)
-                (loop (add1 prev-nl) (sub1 remaining))
+                (loop prev-nl (sub1 remaining))
                 0)))))
 
   (define eol
