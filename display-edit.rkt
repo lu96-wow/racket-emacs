@@ -18,7 +18,8 @@
          "kernel/buffer.rkt"
          "kernel/data/text.rkt"
          "kernel/data/marker.rkt"
-         "kernel/bracket-colorer.rkt")
+         "kernel/bracket-colorer.rkt"
+         "kernel/font-lock.rkt")
 
 (provide redisplay! redisplay-init! invalidate-leaf-caches!)
 
@@ -102,7 +103,8 @@
                     #:content-changed? [content? #f]
                     #:frame-changed?  [frame?  #f]
                     #:bracket-colorer [bkt #f]
-                    #:syntax-table    [st   #f])
+                    #:syntax-table    [st   #f]
+                    #:font-locker     [fl   #f])
   (define db1 (if (and content? (dirty-dirty? db)) (dirty-commit! db) db))
   ;; Bracket depth coloring — after commit (text is final), before clear
   (when (and bkt st (dirty-dirty? db1))
@@ -111,6 +113,15 @@
       (define buf (dirty-buffer-buf db1))
       (define gb  (text-gap (buffer-text buf)))
       (bracket-colorer-update! bkt gb st (car chg) (cdr chg)))
+    (invalidate-leaf-caches! leaf-caches))
+  ;; Font-lock syntax highlighting — after bracket coloring, overwrites
+  ;; bracket faces where font-lock has its own data (string, comment, etc.)
+  (when (and fl (dirty-dirty? db1))
+    (define chg (dirty-change db1))
+    (when chg
+      (define buf (dirty-buffer-buf db1))
+      (define gb  (text-gap (buffer-text buf)))
+      (font-lock-update! fl gb (car chg) (cdr chg)))
     (invalidate-leaf-caches! leaf-caches))
   (when frame? (layout-frame! frm) (invalidate-leaf-caches! leaf-caches))
   (define db2 (dirty-clear! db1))

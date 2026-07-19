@@ -12,6 +12,7 @@
          "kernel/data/text.rkt"
          "kernel/data/syntax.rkt"
          "kernel/bracket-colorer.rkt"
+         "kernel/font-lock.rkt"
          "edit.rkt"
          "input/key.rkt"
          "input/parse.rkt"
@@ -19,8 +20,14 @@
 
 (define initial-content
   (string-append
-   ";; racket-emacs-rebuild\n"
-   ";; C-f/b C-n/p C-a/e C-k C-y C-w C-t C-z/x C-c\n"))
+   ";; racket-emacs-rebuild — font-lock + bracket depth\n"
+   "(define (fib n)\n"
+   "  \"Compute fibonacci(n)\"\n"
+   "  (if (< n 2)\n"
+   "      n\n"
+   "      (+ (fib (- n 1)) (fib (- n 2)))))\n"
+   "\n"
+   ";; Try typing: C-f/b C-n/p C-a/e C-k C-y C-z/x\n"))
 
 (define (edit db frm fn)  (values (fn db) frm #t))
 (define (move db frm fn)  (values (fn db) frm #f))
@@ -76,10 +83,13 @@
       (init-face-cache!)
       (define fc (current-face-cache))
       (bracket-register-faces!)
+      (font-lock-register-faces!)
       (define racket-st (make-racket-syntax-table))
       (define bkt (make-bracket-colorer fc))
-      ;; Initial full bracket scan
+      (define fl  (make-font-locker fc))
+      ;; Initial full color scans
       (bracket-colorer-rescan-all! bkt (text-gap (buffer-text buf)) racket-st)
+      (font-lock-scan-range! fl (text-gap (buffer-text buf)) 0 (buffer-length buf))
       (set-buffer-point! buf (buffer-length buf))
       (define frm (make-frame buf (terminal-width) (terminal-height)))
       (define caches (make-hasheq))
@@ -87,7 +97,7 @@
       (define cache-vb (redisplay-init! frm fc caches))
 
       (let loop ([db db] [frm frm] [cache-vb cache-vb] [caches caches]
-                 [bkt bkt])
+                 [bkt bkt] [fl fl])
         (define ke (read-key))
         (cond
           [(key-quit? ke) (void)]
@@ -100,7 +110,7 @@
                          #:frame-changed? #t
                          #:bracket-colorer bkt
                          #:syntax-table racket-st))
-           (loop d f vb cs bkt)]
+           (loop d f vb cs bkt fl)]
           [else
            (define-values (d f a?) (dispatch-key global-keymap db frm ke cmd-self-insert))
            (define-values (db2 frm2 vb2 cs2)
@@ -108,8 +118,9 @@
                          #:content-changed? a?
                          #:frame-changed? (and a? (not (eq? frm f)))
                          #:bracket-colorer bkt
-                         #:syntax-table racket-st))
-           (loop db2 frm2 vb2 cs2 bkt)])))
+                         #:syntax-table racket-st
+                         #:font-locker fl))
+           (loop db2 frm2 vb2 cs2 bkt fl)])))
     (λ ()
       (display format-cursor-show)
       (display format-reset)
