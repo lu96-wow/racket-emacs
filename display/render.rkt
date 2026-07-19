@@ -13,7 +13,7 @@
 ;;
 ;;   gap-buffer (bytes + faces)  ─┐
 ;;   layout (visual-lines)       ─┤
-;;   face-cache (region merge)   ─┤
+;;   face-registry (named face lookup)   ─┤
 ;;                                ├─→ render-visual-line! → vbuffer-row
 ;;                                │    (cells + buf-start/end + flags)
 ;;                                │
@@ -67,7 +67,7 @@
 ;; render-layout! — fill vbuffer from layout (full render)
 ;; ============================================================
 
-(define (render-layout! ly gb face-cache)
+(define (render-layout! ly gb reg)
   (unless (layout? ly)
     (raise-argument-error 'render-layout! "layout?" ly))
   (define rows (layout-max-rows ly))
@@ -77,7 +77,7 @@
   (for ([vl  (in-list (layout-lines ly))]
         [row (in-naturals)]
         #:when (< row rows))
-    (define vrow (render-visual-line! vl cols gb face-cache #f #f))
+    (define vrow (render-visual-line! vl cols gb reg #f #f))
     (vbuffer-fill-row! vb row
                        (vbuffer-row-cells vrow)
                        (vbuffer-row-buf-start vrow)
@@ -91,7 +91,7 @@
 ;; render-layout/region! — with region highlight overlay
 ;; ============================================================
 
-(define (render-layout/region! ly gb face-cache region-beg region-end)
+(define (render-layout/region! ly gb reg region-beg region-end)
   (define rows (layout-max-rows ly))
   (define cols (layout-max-cols ly))
   (define vb  (make-vbuffer rows cols gb))
@@ -99,7 +99,7 @@
   (for ([vl  (in-list (layout-lines ly))]
         [row (in-naturals)]
         #:when (< row rows))
-    (define vrow (render-visual-line! vl cols gb face-cache
+    (define vrow (render-visual-line! vl cols gb reg
                                        region-beg region-end))
     (vbuffer-fill-row! vb row
                        (vbuffer-row-cells vrow)
@@ -114,7 +114,7 @@
 ;; render-layout/cached! — incremental render with row-cache
 ;; ============================================================
 
-(define (render-layout/cached! ly gb face-cache row-cache)
+(define (render-layout/cached! ly gb reg row-cache)
   (define rows (layout-max-rows ly))
   (define cols (layout-max-cols ly))
   (define vb  (make-vbuffer rows cols gb))
@@ -129,7 +129,7 @@
       ['exact
        (row-cache-blit-row! vb row row-cache row)]
       [_  ;; 'shifted or 'stale — full render + update cache
-       (define vrow (render-visual-line! vl cols gb face-cache #f #f))
+       (define vrow (render-visual-line! vl cols gb reg #f #f))
        (vbuffer-fill-row! vb row
                           (vbuffer-row-cells vrow)
                           (vbuffer-row-buf-start vrow)
@@ -146,7 +146,7 @@
 ;; render-layout/region/cached! — with region + row-cache
 ;; ============================================================
 
-(define (render-layout/region/cached! ly gb face-cache
+(define (render-layout/region/cached! ly gb reg
                                        region-beg region-end row-cache)
   (define rows (layout-max-rows ly))
   (define cols (layout-max-cols ly))
@@ -162,7 +162,7 @@
       ['exact
        (row-cache-blit-row! vb row row-cache row)]
       [_
-       (define vrow (render-visual-line! vl cols gb face-cache
+       (define vrow (render-visual-line! vl cols gb reg
                                           region-beg region-end))
        (vbuffer-fill-row! vb row
                           (vbuffer-row-cells vrow)
@@ -180,7 +180,7 @@
 ;; render-visual-line! — one visual-line → vbuffer-row
 ;; ============================================================
 
-(define (render-visual-line! vl ncols gb face-cache region-beg region-end)
+(define (render-visual-line! vl ncols gb reg region-beg region-end)
   ;; Fill one screen row.  Returns a vbuffer-row with cells + byte-range.
   (define content     (visual-line-content vl))
   (define buf-pos     (visual-line-buf-pos vl))
@@ -191,10 +191,11 @@
   (define gap-len     (gap-length gb))
 
   ;; Pre-resolve region overlay face-id (once per row)
+  (define fc (and reg (face-registry-cache reg)))
   (define region-fid
-    (and face-cache region-beg region-end
+    (and reg region-beg region-end
          (< region-beg region-end)
-         (face-id-for-name (quote region) face-cache)))
+         (face-id-for-name reg (quote region))))
 
   ;; Cache: (base-fid . overlay-fid) → merged-fid
   (define merge-cache (make-hash))
@@ -220,7 +221,7 @@
                (hash-ref! merge-cache key
                           (λ ()
                             (face-id-with-overlay-id
-                             base-fid region-fid face-cache)))]))
+                             base-fid region-fid fc)))]))
 
       (define cw (max 0 (char-display-width ch)))
 

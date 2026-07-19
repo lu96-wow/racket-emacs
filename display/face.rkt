@@ -4,34 +4,33 @@
 ;;
 ;; ============================================================================
 ;; Three layers:
-;;   1. face-attrs  — logical properties (color, weight, slant)
-;;   2. face-cache  — maps attrs → integer face-id, caches ANSI bytes
-;;   3. named faces — symbol → face-attrs (keyword, comment, string, ...)
+;;   1. face-attrs    — logical properties (color, weight, slant)
+;;   2. face-cache    — maps attrs → integer face-id, caches ANSI bytes
+;;   3. face-registry — binds named faces to attrs + owns the cache
+;;
+;; ============================================================================
+;; Architecture — explicit state, no globals
+;; ============================================================================
+;;
+;;   face-registry  =  named-table (symbol → face-attrs)
+;;                   + face-cache   (attrs → face-id → ANSI bytes)
+;;
+;;   The caller creates a face-registry, registers faces into it,
+;;   then passes it through the pipeline.  No hidden global state.
 ;;
 ;; ============================================================================
 ;; Computation vs Application
 ;; ============================================================================
 ;;
-;;   ── Pure Queries ──
-;;     face-attrs-ref     face-attrs key → value
+;;   ── Pure ──
+;;     face-attrs-ref              fa key → value
+;;     merge-face-attrs            base overlay → merged-attrs
 ;;
-;;   ── Imperative (register faces into cache) ──
-;;     define-face!                 name attrs → void
-;;     face-id-for-name             name [fc] → face-id
+;;   ── Imperative (mutate registry or cache) ──
+;;     define-face!                 reg name attrs → void
+;;     face-id-for-name             reg name → face-id
 ;;     face-id-with-overlay-id      base-fid overlay-fid fc → merged-fid
 ;;     face-cache-lookup-or-realize! fc attrs depth → realized-face
-;;
-;; ============================================================================
-;; Face-Id Convention
-;; ============================================================================
-;;
-;;   face-id 0 = default (no highlighting)
-;;   face-id 1..N = registered faces (assigned by face-cache in order)
-;;
-;;   Language setup calls define-face! then face-id-for-name for each face.
-;;   The returned face-id is what the colorer writes to the gap buffer.
-;;   The render reads face-ids directly from the gap (via kernel/data/face.rkt).
-;;   The terminal flush uses face-cache-by-id to get ANSI bytes.
 ;;
 ;; ============================================================================
 ;; Dependencies: platform/ansi.rkt (format strings only, no state)
@@ -51,22 +50,21 @@
  realized-face? realized-face-id realized-face-attrs
  realized-face-ansi-bytes
 
- ;; ── face cache ──
+ ;; ── face cache (low-level: attrs → face-id → ANSI) ──
  face-cache? make-face-cache
  face-cache-by-id face-cache-next-id
  face-cache-lookup-or-realize!
 
- ;; ── named faces ──
- define-face! face-id-for-name
+ ;; ── face registry (high-level: named faces + cache) ──
+ face-registry? make-face-registry
+ face-registry-cache face-registry-named
+ define-face! face-id-for-name face-attrs-by-name
 
  ;; ── face merging ──
  merge-face-attrs face-id-with-overlay-id
 
- ;; ── predefined faces ──
- default-face region-face
-
- ;; ── global cache ──
- current-face-cache init-face-cache!)
+ ;; ── predefined face name constants ──
+ default-face region-face)
 
 ;; ============================================================
 ;; Attribute keys
@@ -80,7 +78,7 @@
 (define attr-inverse-video 'inverse-video)
 
 ;; ============================================================
-;; face-attrs — logical face properties
+;; face-attrs — logical face properties (pure data)
 ;; ============================================================
 
 (struct face-attrs (props) #:transparent)
@@ -91,7 +89,6 @@
      (values (list-ref kvs i) (list-ref kvs (add1 i))))))
 
 (define (face-attrs-ref fa key [default #f])
-  ;; Read a property from face-attrs.
   (unless (face-attrs? fa)
     (raise-argument-error 'face-attrs-ref "face-attrs?" fa))
   (hash-ref (face-attrs-props fa) key default))
@@ -103,8 +100,6 @@
 (struct realized-face (id attrs ansi-bytes) #:transparent)
 
 (define (realize-face id attrs depth)
-  ;; Produce ANSI escape bytes for a set of face attributes.
-  ;; Contract: attrs must be a face-attrs?, depth one of 'truecolor|'256|'16|'none.
   (unless (face-attrs? attrs)
     (raise-argument-error 'realize-face "face-attrs?" attrs))
   (define out (open-output-bytes))
@@ -156,7 +151,7 @@
   (+ (if bright? 8 0) (if (> r 128) 1 0) (if (> g 128) 2 0) (if (> b 128) 4 0)))
 
 ;; ============================================================
-;; Face cache — attrs → face-id → ANSI bytes
+;; Face cache — attrs → face-id → ANSI bytes (low-level)
 ;; ============================================================
 
 (struct face-cache
@@ -166,13 +161,10 @@
   #:transparent)
 
 (define (make-face-cache)
-  ;; Default face (id=0) has no attributes — transparent.
   (define default-rf (realize-face 0 (make-face-attrs) (color-depth)))
   (face-cache (make-hash) (vector default-rf) 1))
 
 (define (face-cache-lookup-or-realize! fc attrs depth)
-  ;; Look up face-attrs in the cache.  If not present, assign a new
-  ;; face-id, realize ANSI bytes, and store.  Returns realized-face.
   (unless (face-cache? fc)
     (raise-argument-error 'face-cache-lookup-or-realize! "face-cache?" fc))
   (define key (face-attrs-props attrs))
@@ -186,46 +178,56 @@
       rf)))
 
 ;; ============================================================
-;; Named faces — symbol → face-attrs → face-id
+;; Face registry — named faces + cache (high-level, explicit ownership)
 ;; ============================================================
 
-(define named-face-table (make-hash))
+(struct face-registry
+  (named   ; hash[symbol → face-attrs] — mutable
+   cache)  ; face-cache? — attrs → face-id → ANSI
+  #:transparent)
 
-(define (define-face! name attrs)
-  ;; Register a named face.  Does NOT assign a face-id yet —
-  ;; face-id-for-name does that on first lookup.
+(define (make-face-registry)
+  (face-registry (make-hash) (make-face-cache)))
+
+;; ============================================================
+;; Named face operations — all take registry explicitly
+;; ============================================================
+
+(define (define-face! reg name attrs)
+  (unless (face-registry? reg)
+    (raise-argument-error 'define-face! "face-registry?" reg))
   (unless (symbol? name)
     (raise-argument-error 'define-face! "symbol?" name))
   (unless (face-attrs? attrs)
     (raise-argument-error 'define-face! "face-attrs?" attrs))
-  (hash-set! named-face-table name attrs))
+  (hash-set! (face-registry-named reg) name attrs))
 
-(define (face-id-for-name name [fc (current-face-cache)])
-  ;; Resolve a named face to its face-id.
-  ;; Realizes the face through the cache, assigning a stable face-id.
-  ;; Returns face-id or 0 if face is not registered.
-  (cond [(not fc) 0]
-        [(hash-has-key? named-face-table name)
+(define (face-id-for-name reg name)
+  (unless (face-registry? reg)
+    (raise-argument-error 'face-id-for-name "face-registry?" reg))
+  (unless (symbol? name)
+    (raise-argument-error 'face-id-for-name "symbol?" name))
+  (define named (face-registry-named reg))
+  (define fc    (face-registry-cache reg))
+  (cond [(hash-has-key? named name)
          (realized-face-id
           (face-cache-lookup-or-realize! fc
-            (hash-ref named-face-table name)
+            (hash-ref named name)
             (color-depth)))]
         [else
-         (unless (memq name '(default region))
-           (log-warning "face-id-for-name: face not registered: ~a" name))
+         (log-warning "face-id-for-name: face not registered: ~a" name)
          0]))
 
-(define (face-attrs-by-name name)
-  ;; Get face-attrs for a named face.  Returns default attrs if not found.
-  (hash-ref named-face-table name (λ () (make-face-attrs))))
+(define (face-attrs-by-name reg name)
+  (unless (face-registry? reg)
+    (raise-argument-error 'face-attrs-by-name "face-registry?" reg))
+  (hash-ref (face-registry-named reg) name (λ () (make-face-attrs))))
 
 ;; ============================================================
-;; Face merging
+;; Face merging (uses face-cache, not registry)
 ;; ============================================================
 
 (define (merge-face-attrs base overlay)
-  ;; Merge two face-attrs: overlay properties override base properties.
-  ;; Returns a new face-attrs.
   (define base-props (face-attrs-props base))
   (define overlay-props (face-attrs-props overlay))
   (define merged (make-hash))
@@ -234,12 +236,6 @@
   (face-attrs merged))
 
 (define (face-id-with-overlay-id base-fid overlay-fid fc)
-  ;; Given two face-ids, produce a merged face-id through the cache.
-  ;; Looks up attrs for both IDs, merges them, and realizes the result.
-  ;; Contracts:
-  ;;   - base-fid, overlay-fid: valid face-ids in face-cache
-  ;;   - fc: face-cache?
-  ;; Returns merged face-id, or base-fid if overlay is 0 or cache is invalid.
   (cond [(not fc) base-fid]
         [(zero? overlay-fid) base-fid]
         [(zero? base-fid) overlay-fid]
@@ -248,7 +244,6 @@
          (cond
            [(or (>= base-fid (vector-length by-id))
                 (>= overlay-fid (vector-length by-id)))
-            ;; Invalid face-ids — return base as-is
             base-fid]
            [else
             (define base-attrs (realized-face-attrs (vector-ref by-id base-fid)))
@@ -258,24 +253,8 @@
              (face-cache-lookup-or-realize! fc merged-attrs (color-depth)))])]))
 
 ;; ============================================================
-;; Predefined faces
+;; Predefined face name constants (registration left to caller)
 ;; ============================================================
 
 (define default-face 'default)
 (define region-face 'region)
-
-(define-face! default-face (make-face-attrs))
-(define-face! region-face (make-face-attrs attr-background 8))
-
-;; ============================================================
-;; Global face cache
-;; ============================================================
-
-(define global-face-cache (box #f))
-
-(define (current-face-cache)
-  (unbox global-face-cache))
-
-(define (init-face-cache!)
-  (unless (unbox global-face-cache)
-    (set-box! global-face-cache (make-face-cache))))

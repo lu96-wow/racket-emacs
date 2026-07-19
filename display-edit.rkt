@@ -43,7 +43,7 @@
            changed?))))
 
 ;; ── Render ──
-(define (render-frame frm face-cache leaf-caches)
+(define (render-frame frm reg leaf-caches)
   (define fw (frame-w frm))
   (define fh (frame-h frm))
   (define frame-vb (make-vbuffer fh fw))
@@ -67,9 +67,9 @@
       (define reg-active? (region-active? buf))
       (define leaf-vb
         (if reg-active?
-            (render-layout/region/cached! ly gb face-cache
+            (render-layout/region/cached! ly gb reg
                (region-beginning buf) (region-end buf) rc)
-            (render-layout/cached! ly gb face-cache rc)))
+            (render-layout/cached! ly gb reg rc)))
       (vbuffer-blit! frame-vb (rect-top geo) (rect-left geo) leaf-vb)
       (when (eq? lf sel)
         (define cr (layout-cursor-row ly))
@@ -78,26 +78,26 @@
         (when cc (set! cursor-col (+ (rect-left geo) cc))))))
   (values frame-vb cursor-row cursor-col))
 
-(define (flush-frame vb cache-vb face-cache cur-row cur-col)
+(define (flush-frame vb cache-vb fc cur-row cur-col)
   (define output
     (if cache-vb
-        (terminal-flush-delta! vb cache-vb face-cache)
-        (terminal-flush! vb face-cache)))
+        (terminal-flush-delta! vb cache-vb fc)
+        (terminal-flush! vb fc)))
   (display output)
   (display (format-cursor-move cur-row cur-col))
   (flush-output))
 
-(define (render-and-flush! frm fc leaf-caches cache-vb)
+(define (render-and-flush! frm reg leaf-caches cache-vb)
   (define-values (new-vb cr cc)
     (with-handlers ([exn:fail? (λ (e)
                     (eprintf "Render error: ~a\n" (exn-message e))
                     (values cache-vb 0 0))])
-      (render-frame frm fc leaf-caches)))
-  (flush-frame new-vb cache-vb fc cr cc)
+      (render-frame frm reg leaf-caches)))
+  (flush-frame new-vb cache-vb (face-registry-cache reg) cr cc)
   new-vb)
 
 ;; ── Pipeline ──
-(define (redisplay! db frm fc leaf-caches cache-vb
+(define (redisplay! db frm reg leaf-caches cache-vb
                     #:content-changed? [content? #f]
                     #:frame-changed?  [frame?  #f])
   (define db1 (if (and content? (dirty-dirty? db)) (dirty-commit! db) db))
@@ -105,13 +105,13 @@
   (define db2 (dirty-clear! db1))
   (define scrolled? (sync-viewport! frm leaf-caches))
   (if (or content? frame? scrolled?)
-      (let ([new-vb (render-and-flush! frm fc leaf-caches cache-vb)])
+      (let ([new-vb (render-and-flush! frm reg leaf-caches cache-vb)])
         (values db2 frm new-vb leaf-caches))
       (values db2 frm cache-vb leaf-caches)))
 
-(define (redisplay-init! frm fc leaf-caches)
+(define (redisplay-init! frm reg leaf-caches)
   (sync-viewport! frm leaf-caches)
-  (render-and-flush! frm fc leaf-caches #f))
+  (render-and-flush! frm reg leaf-caches #f))
 
 (define (invalidate-leaf-caches! leaf-caches)
   (for ([(lf rc) (in-hash leaf-caches)]) (row-cache-invalidate! rc)))

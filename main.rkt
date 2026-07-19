@@ -80,20 +80,23 @@
       (flush-output)
       (define buf (make-buffer "*scratch*" initial-content))
       (define db  (make-dirty-buffer buf))
-      (init-face-cache!)
-      (define fc (current-face-cache))
+      ;; Face registry — explicit ownership, no globals
+      (define reg (make-face-registry))
+      ;; Register predefined faces
+      (define-face! reg default-face (make-face-attrs))
+      (define-face! reg region-face (make-face-attrs attr-background 8))
       ;; Register font-lock faces (display concern — colors)
       (for ([spec (in-list font-lock-face-specs)])
         (match-define (list name kvs ...) spec)
-        (define-face! name (apply make-face-attrs kvs)))
-      (define fl  (make-font-locker (λ (name) (face-id-for-name name fc))))
+        (define-face! reg name (apply make-face-attrs kvs)))
+      (define fl  (make-font-locker (λ (name) (face-id-for-name reg name))))
       ;; Initial full color scan
       (font-lock-scan-range! fl (text-gap (buffer-text buf)) 0 (buffer-length buf))
       (set-buffer-point! buf (buffer-length buf))
       (define frm (make-frame buf (terminal-width) (terminal-height)))
       (define caches (make-hasheq))
 
-      (define cache-vb (redisplay-init! frm fc caches))
+      (define cache-vb (redisplay-init! frm reg caches))
 
       (let loop ([db db] [frm frm] [cache-vb cache-vb] [caches caches]
                  [fl fl])
@@ -105,7 +108,7 @@
            (detect-terminal-size!)
            (define f (frame-resize frm (terminal-width) (terminal-height)))
            (define-values (d _ vb cs)
-             (redisplay! db f fc caches cache-vb
+             (redisplay! db f reg caches cache-vb
                          #:frame-changed? #t))
            (loop d f vb cs fl)]
           [else
@@ -123,7 +126,7 @@
              (invalidate-leaf-caches! caches))
            ;; display layer: render
            (define-values (db2 frm2 vb2 cs2)
-             (redisplay! d1 f fc caches cache-vb
+             (redisplay! d1 f reg caches cache-vb
                          #:content-changed? a?
                          #:frame-changed? (and a? (not (eq? frm f)))))
            (loop db2 frm2 vb2 cs2 fl)])))
