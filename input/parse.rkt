@@ -255,8 +255,9 @@
       [else (loop (bytes-append acc (bytes b)))])))
 
 (define (normalize-paste bs)
-  ;; Strip ALL \r characters (Windows line endings, stray CR).
-  (regexp-replace* #rx"\r" (bytes->string/utf-8 bs) ""))
+  ;; Normalize line endings: \r\n → \n, lone \r → \n.
+  (define s (bytes->string/utf-8 bs))
+  (regexp-replace* #rx"\r\n|\r" s "\n"))
 
 ;; ============================================================
 ;; read-key — main entry point
