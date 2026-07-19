@@ -97,17 +97,61 @@
   new-vb)
 
 ;; ── Pipeline ──
+;;
+;;   dirty-clear!  →  layout  →  sync-scroll  →  render+flush
+;;
+;; Each stage is a named function with explicit inputs/outputs
+;; for testability and inspection.
+;;
+;;   dirty-commit! is NOT here — main.rkt does that before calling
+;;   redisplay! because lang-layer colorers (font-lock) need the
+;;   committed state.
+
+;; ── Stage 1: dirty-clear! ──
+
+(define (dirty-clear-stage db content?)
+  ;; Clear the change marker.  Returns fresh db.
+  ;; Caller must have already called dirty-commit! before colorers.
+  (if (and content? (dirty-dirty? db))
+      (dirty-clear! db)
+      db))
+
+;; ── Stage 2: layout ──
+
+(define (layout-stage frm leaf-caches frame?)
+  ;; Recalculate window geometry.  Mutates frm + invalidates caches.
+  ;; Returns void — side effects only.
+  (when frame?
+    (layout-frame! frm)
+    (invalidate-leaf-caches! leaf-caches)))
+
+;; ── Stage 3: sync scroll ──
+
+(define (sync-stage frm leaf-caches)
+  ;; Adjust scroll to keep point visible in each leaf.
+  ;; Returns boolean? — #t if any leaf's scroll changed.
+  (sync-viewport! frm leaf-caches))
+
+;; ── Stage 4: render + flush ──
+
+(define (render-stage frm reg leaf-caches cache-vb should-render?)
+  ;; Build frame vbuffer, diff against cache, output to terminal.
+  ;; Returns the new cache vbuffer (or cache-vb unchanged if no render).
+  (if should-render?
+      (render-and-flush! frm reg leaf-caches cache-vb)
+      cache-vb))
+
+;; ── redisplay! — composed pipeline ──
+
 (define (redisplay! db frm reg leaf-caches cache-vb
                     #:content-changed? [content? #f]
                     #:frame-changed?  [frame?  #f])
-  (define db1 (if (and content? (dirty-dirty? db)) (dirty-commit! db) db))
-  (when frame? (layout-frame! frm) (invalidate-leaf-caches! leaf-caches))
-  (define db2 (dirty-clear! db1))
-  (define scrolled? (sync-viewport! frm leaf-caches))
-  (if (or content? frame? scrolled?)
-      (let ([new-vb (render-and-flush! frm reg leaf-caches cache-vb)])
-        (values db2 frm new-vb leaf-caches))
-      (values db2 frm cache-vb leaf-caches)))
+  (define db2      (dirty-clear-stage db content?))
+  (layout-stage frm leaf-caches frame?)
+  (define scrolled? (sync-stage frm leaf-caches))
+  (define new-vb   (render-stage frm reg leaf-caches cache-vb
+                                 (or content? frame? scrolled?)))
+  (values db2 frm new-vb leaf-caches))
 
 (define (redisplay-init! frm reg leaf-caches)
   (sync-viewport! frm leaf-caches)
