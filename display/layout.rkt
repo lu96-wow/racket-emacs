@@ -240,41 +240,49 @@
                       [else (loop (add1 row) (add1 nl))])])))
 
 ;; ============================================================
-;; Scroll calculation — pure: keep point visible in viewport
+;; Scroll calculation — unified viewport model
 ;; ============================================================
+;;
+;;   Viewport = window of max-rows × max-cols, anchored at (start-pos, hscroll).
+;;   A scroll-margin of 2 keeps point 2 rows from the edge.
+;;   When point enters the margin zone, scroll the viewport to follow.
+
+(define scroll-margin 2)
 
 (define (calc-scroll gb pt-pos start-pos max-rows max-cols
                      hscroll wrap-mode)
-  ;; Pure: determines the scroll position that brings pt-pos into view.
-  ;; Returns (values new-start new-hscroll) — both are byte-pos and
-  ;; column respectively.  The CALLER applies them to leaf markers.
+  ;; Pure: returns (values new-start new-hscroll).
+  ;; Returns #f for new-start if no vertical scroll needed.
+  (define (nl? b) (= b #x0A))
   (define len (gap-length gb))
 
-  ;; Vertical: point above viewport → scroll up; below → scroll down.
+  ;; ── Vertical: viewport [start-line, start-line + max-rows) ──
+  ;; Safe zone: [start-line + margin, start-line + max-rows - margin)
   (define new-start
-    (cond [(< pt-pos start-pos)
-           ;; Point above → scroll up so point is on first line
-           (let ([nl (gap-scan-byte gb pt-pos 'backward (λ (b) (= b #x0A)))])
-             (if (>= nl 0) (add1 nl) 0))]
-          [(point-below? gb pt-pos start-pos max-rows max-cols wrap-mode len)
-           ;; Point below → scroll down by ONE line
-           (let ([nl (gap-scan-byte gb start-pos 'forward (λ (b) (= b #x0A)))])
-             (if (< nl len) (add1 nl) start-pos))]
-          [else #f]))
+    (cond
+      ;; Point above viewport
+      [(< pt-pos start-pos)
+       (beginning-of-nth-prev-line gb pt-pos (max 0 (sub1 scroll-margin)))]
+      ;; Point in bottom margin? Count lines from start-pos.
+      [(let count ([pos start-pos] [row 0])
+         (cond [(>= row (- max-rows scroll-margin)) #t]
+               [(>= pos len)      #f]
+               [else
+                (define nl (gap-scan-byte gb pos 'forward nl?))
+                (if (>= nl pt-pos) #f (count (add1 nl) (add1 row)))]))
+       ;; Scroll so point is just above the bottom margin
+       (beginning-of-nth-prev-line gb pt-pos (- max-rows scroll-margin 2))]
+      [else #f]))
 
-  ;; Horizontal (truncate mode only): after vertical scroll hscroll resets
-  ;; to 0 so long-line hscroll doesn't leak into shorter lines.
+  ;; ── Horizontal: viewport [hscroll, hscroll + max-cols) ──
   (define base-h (if new-start 0 hscroll))
   (define new-hscroll
     (if (eq? wrap-mode 'none)
         (let* ([bol (gap-scan-byte gb pt-pos 'backward (λ (b) (= b #x0A)))]
                [line-start (if (>= bol 0) (add1 bol) 0)]
                [pt-col (gap-display-width gb line-start pt-pos)])
-          (cond [(< pt-col base-h)
-                 ;; Point left of visible area
-                 pt-col]
+          (cond [(< pt-col base-h) pt-col]
                 [(>= pt-col (+ base-h max-cols))
-                 ;; Point right of visible area
                  (hscroll-char-boundary gb line-start pt-pos
                                         (max 0 (- pt-col max-cols -1)))]
                 [else base-h]))
@@ -283,29 +291,8 @@
   (values (or new-start start-pos) new-hscroll))
 
 ;; ============================================================
-;; Scroll helpers (internal)
+;; Scroll helpers — empty-line-safe line counting
 ;; ============================================================
-
-(define (point-below? gb pt start max-rows max-cols wrap len)
-  ;; Is PT below the viewport's last visible row?
-  (define (nl? b) (= b #x0A))
-  (if (eq? wrap 'none)
-      (let loop ([pos start] [row 0])
-        (cond [(>= row max-rows) #t]
-              [else
-               (define nl (gap-scan-byte gb pos 'forward nl?))
-               (if (>= nl pt)
-                   #f
-                   (loop (add1 nl) (add1 row)))]))
-      (let ([vlines (visual-line-lines gb start max-rows max-cols
-                                       #:wrap-mode 'char)])
-        (cond [(null? vlines) (> pt start)]
-              [else
-               (define last-end (visual-line-end-buf-pos (last vlines)))
-               (or (> pt last-end)
-                   (and (= pt last-end)
-                        (or (< last-end len)
-                            (= (length vlines) max-rows))))]))))
 
 (define (hscroll-char-boundary gb line-start pt-pos raw)
   ;; Smallest display column ≥ RAW that falls on a char boundary.
