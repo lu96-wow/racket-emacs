@@ -9,6 +9,9 @@
          "platform/termios.rkt"
          "kernel/buffer.rkt"
          "kernel/dirty.rkt"
+         "kernel/data/text.rkt"
+         "kernel/data/syntax.rkt"
+         "kernel/bracket-colorer.rkt"
          "edit.rkt"
          "input/key.rkt"
          "input/parse.rkt"
@@ -72,30 +75,41 @@
       (define db  (make-dirty-buffer buf))
       (init-face-cache!)
       (define fc (current-face-cache))
+      (bracket-register-faces!)
+      (define racket-st (make-racket-syntax-table))
+      (define bkt (make-bracket-colorer fc))
+      ;; Initial full bracket scan
+      (bracket-colorer-rescan-all! bkt (text-gap (buffer-text buf)) racket-st)
       (set-buffer-point! buf (buffer-length buf))
       (define frm (make-frame buf (terminal-width) (terminal-height)))
       (define caches (make-hasheq))
 
       (define cache-vb (redisplay-init! frm fc caches))
 
-      (let loop ([db db] [frm frm] [cache-vb cache-vb] [caches caches])
+      (let loop ([db db] [frm frm] [cache-vb cache-vb] [caches caches]
+                 [bkt bkt])
         (define ke (read-key))
         (cond
           [(key-quit? ke) (void)]
-          [(key-idle? ke) (loop db frm cache-vb caches)]
+          [(key-idle? ke) (loop db frm cache-vb caches bkt)]
           [(and (key-sym? ke) (eq? (key-sym-name ke) 'resize))
            (detect-terminal-size!)
            (define f (frame-resize frm (terminal-width) (terminal-height)))
            (define-values (d _ vb cs)
-             (redisplay! db f fc caches cache-vb #:frame-changed? #t))
-           (loop d f vb cs)]
+             (redisplay! db f fc caches cache-vb
+                         #:frame-changed? #t
+                         #:bracket-colorer bkt
+                         #:syntax-table racket-st))
+           (loop d f vb cs bkt)]
           [else
            (define-values (d f a?) (dispatch-key global-keymap db frm ke cmd-self-insert))
            (define-values (db2 frm2 vb2 cs2)
              (redisplay! d f fc caches cache-vb
                          #:content-changed? a?
-                         #:frame-changed? (and a? (not (eq? frm f)))))
-           (loop db2 frm2 vb2 cs2)])))
+                         #:frame-changed? (and a? (not (eq? frm f)))
+                         #:bracket-colorer bkt
+                         #:syntax-table racket-st))
+           (loop db2 frm2 vb2 cs2 bkt)])))
     (λ ()
       (display format-cursor-show)
       (display format-reset)

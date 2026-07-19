@@ -17,7 +17,8 @@
          "kernel/dirty.rkt"
          "kernel/buffer.rkt"
          "kernel/data/text.rkt"
-         "kernel/data/marker.rkt")
+         "kernel/data/marker.rkt"
+         "kernel/bracket-colorer.rkt")
 
 (provide redisplay! redisplay-init! invalidate-leaf-caches!)
 
@@ -99,8 +100,17 @@
 ;; ── Pipeline ──
 (define (redisplay! db frm fc leaf-caches cache-vb
                     #:content-changed? [content? #f]
-                    #:frame-changed?  [frame?  #f])
+                    #:frame-changed?  [frame?  #f]
+                    #:bracket-colorer [bkt #f]
+                    #:syntax-table    [st   #f])
   (define db1 (if (and content? (dirty-dirty? db)) (dirty-commit! db) db))
+  ;; Bracket depth coloring — after commit (text is final), before clear
+  (when (and bkt st (dirty-dirty? db1))
+    (define chg (dirty-change db1))
+    (when chg
+      (define buf (dirty-buffer-buf db1))
+      (define gb  (text-gap (buffer-text buf)))
+      (bracket-colorer-update! bkt gb st (car chg) (cdr chg))))
   (when frame? (layout-frame! frm) (invalidate-leaf-caches! leaf-caches))
   (define db2 (dirty-clear! db1))
   (define scrolled? (sync-viewport! frm leaf-caches))
