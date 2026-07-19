@@ -240,41 +240,35 @@
                       [else (loop (add1 row) (add1 nl))])])))
 
 ;; ============================================================
-;; Scroll calculation — unified viewport model
+;; Scroll — viewport = [start-line, start-line+max-rows) × [hscroll, hscroll+max-cols)
 ;; ============================================================
 ;;
-;;   Viewport = window of max-rows × max-cols, anchored at (start-pos, hscroll).
-;;   A scroll-margin of 2 keeps point 2 rows from the edge.
-;;   When point enters the margin zone, scroll the viewport to follow.
+;; Point outside viewport → move viewport to bring point back in.
+;; scroll-margin shrinks the safe zone inward.
+;;
+;;   Above: new-start-line = max(0, pt-line - margin)
+;;   Below: new-start-line = pt-line - max-rows + margin + 1
+;;   Left:  new-hscroll     = pt-col
+;;   Right: new-hscroll     = pt-col - max-cols + 1
 
-(define scroll-margin 2)
+(define scroll-margin 0)
 
-(define (calc-scroll gb pt-pos start-pos max-rows max-cols
-                     hscroll wrap-mode)
-  ;; Pure: returns (values new-start new-hscroll).
-  ;; Returns #f for new-start if no vertical scroll needed.
-  (define (nl? b) (= b #x0A))
-  (define len (gap-length gb))
+(define (calc-scroll gb pt-pos start-pos max-rows max-cols hscroll wrap-mode)
+  (define pt-line   (line-of-pos gb pt-pos))
+  (define start-line (line-of-pos gb start-pos))
 
-  ;; ── Vertical: viewport [start-line, start-line + max-rows) ──
-  ;; Safe zone: [start-line + margin, start-line + max-rows - margin)
-  (define new-start
-    (cond
-      ;; Point above viewport
-      [(< pt-pos start-pos)
-       (beginning-of-nth-prev-line gb pt-pos (max 0 (sub1 scroll-margin)))]
-      ;; Point in bottom margin? Count lines from start-pos.
-      [(let count ([pos start-pos] [row 0])
-         (cond [(>= row (- max-rows scroll-margin)) #t]
-               [(>= pos len)      #f]
-               [else
-                (define nl (gap-scan-byte gb pos 'forward nl?))
-                (if (>= nl pt-pos) #f (count (add1 nl) (add1 row)))]))
-       ;; Scroll so point is just above the bottom margin
-       (beginning-of-nth-prev-line gb pt-pos (- max-rows scroll-margin 2))]
-      [else #f]))
+  ;; ── Vertical ──
+  (define m (if (eq? wrap-mode 'none) scroll-margin 0))
+  (define safe-top (+ start-line m))
+  (define safe-bot (+ start-line max-rows (- m)))
 
-  ;; ── Horizontal: viewport [hscroll, hscroll + max-cols) ──
+  (define new-start-line
+    (cond [(< pt-line safe-top) (max 0 (- pt-line m))]
+          [(>= pt-line safe-bot) (+ pt-line (- max-rows) m 1)]
+          [else #f]))
+  (define new-start (and new-start-line (nth-line-start gb new-start-line)))
+
+  ;; ── Horizontal ──
   (define base-h (if new-start 0 hscroll))
   (define new-hscroll
     (if (eq? wrap-mode 'none)
@@ -291,7 +285,29 @@
   (values (or new-start start-pos) new-hscroll))
 
 ;; ============================================================
-;; Scroll helpers — empty-line-safe line counting
+;; Line helpers — absolute line numbers (0-based, \n = line boundary)
+;; ============================================================
+
+(define (line-of-pos gb pos)
+  ;; Number of \n before pos = absolute line number of pos.
+  (define (nl? b) (= b #x0A))
+  (let loop ([p 0] [line 0])
+    (if (>= p pos) line
+        (let ([nl (gap-scan-byte gb p 'forward nl?)])
+          (if (or (< nl 0) (>= nl pos)) line
+              (loop (add1 nl) (add1 line)))))))
+
+(define (nth-line-start gb n)
+  ;; Byte position of the start of line N (0-based).
+  (if (zero? n) 0
+      (let loop ([p 0] [remaining n])
+        (let ([nl (gap-scan-byte gb p 'forward (λ (b) (= b #x0A)))])
+          (if (>= nl (gap-length gb)) nl
+              (if (zero? (sub1 remaining)) (add1 nl)
+                  (loop (add1 nl) (sub1 remaining))))))))
+
+;; ============================================================
+;; Horizontal helpers
 ;; ============================================================
 
 (define (hscroll-char-boundary gb line-start pt-pos raw)
@@ -301,16 +317,3 @@
   (if (or (>= w raw) (>= seg pt-pos))
       w
       (+ w (max 0 (char-display-width (gap-char gb seg))))))
-
-(define (beginning-of-nth-prev-line gb pos n)
-  ;; Return byte-pos of start of Nth previous line.
-  (define (nl? b) (= b #x0A))
-  (let loop ([p pos] [remaining n])
-    (if (<= p 0)
-        0
-        (let ([nl (gap-scan-byte gb (max 0 (sub1 p)) 'backward nl?)])
-          (if (< nl 0)
-              0
-              (if (zero? remaining)
-                  (add1 nl)
-                  (loop nl (sub1 remaining))))))))

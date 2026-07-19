@@ -1,1 +1,0 @@
-("9.2" ta6le ("7e81f54d21b0d143a9d503465c9b47c487c8d348" . "dab7f65b7cd7b30d43f4cd98694844796c9c9576") #"/home/debian/\346\241\214\351\235\242/editer/racket-emacs-rebuild/input/../platform/termios.rkt" #"/home/debian/\346\241\214\351\235\242/editer/racket-emacs-rebuild/input/key.rkt" (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt"))
