@@ -25,7 +25,7 @@
 ;; ============================================================================
 ;;
 ;;   0       = default face (no highlighting)
-;;   1..255  = registered faces (font-lock colors, bracket depths, region, etc.)
+;;   1..255  = registered faces (font-lock colors, region, etc.)
 ;;
 ;;   Newly inserted text always gets face-id 0.  Colorers write face-ids
 ;;   afterwards via face-fill! or face-set!.

@@ -1,1 +1,0 @@
-("9.2" ta6le ("8e73ca5397b3f8db912931b186c5f764697d5767" . "de6f79d744584bce88717cd23157aff42faf1011") #"/home/debian/\346\241\214\351\235\242/editer/racket-emacs-rebuild/kernel/data/gap.rkt" #"/home/debian/\346\241\214\351\235\242/editer/racket-emacs-rebuild/kernel/data/utf8.rkt" (collects #"racket" #"main.rkt") (collects #"racket" #"runtime-config.rkt"))

@@ -11,7 +11,6 @@
          "kernel/dirty.rkt"
          "kernel/data/text.rkt"
          "kernel/data/syntax.rkt"
-         "kernel/bracket-colorer.rkt"
          "kernel/font-lock.rkt"
          "edit.rkt"
          "input/key.rkt"
@@ -20,7 +19,7 @@
 
 (define initial-content
   (string-append
-   ";; racket-emacs-rebuild — font-lock + bracket depth\n"
+   ";; racket-emacs-rebuild — font-lock\n"
    "(define (fib n)\n"
    "  \"Compute fibonacci(n)\"\n"
    "  (if (< n 2)\n"
@@ -83,13 +82,10 @@
       (define db  (make-dirty-buffer buf))
       (init-face-cache!)
       (define fc (current-face-cache))
-      (bracket-register-faces!)
       (font-lock-register-faces!)
       (define racket-st (make-racket-syntax-table))
-      (define bkt (make-bracket-colorer fc))
       (define fl  (make-font-locker fc))
-      ;; Initial full color scans
-      (bracket-colorer-rescan-all! bkt (text-gap (buffer-text buf)) racket-st)
+      ;; Initial full color scan
       (font-lock-scan-range! fl (text-gap (buffer-text buf)) 0 (buffer-length buf))
       (set-buffer-point! buf (buffer-length buf))
       (define frm (make-frame buf (terminal-width) (terminal-height)))
@@ -98,20 +94,19 @@
       (define cache-vb (redisplay-init! frm fc caches))
 
       (let loop ([db db] [frm frm] [cache-vb cache-vb] [caches caches]
-                 [bkt bkt] [fl fl])
+                 [fl fl])
         (define ke (read-key))
         (cond
           [(key-quit? ke) (void)]
-          [(key-idle? ke) (loop db frm cache-vb caches bkt)]
+          [(key-idle? ke) (loop db frm cache-vb caches fl)]
           [(and (key-sym? ke) (eq? (key-sym-name ke) 'resize))
            (detect-terminal-size!)
            (define f (frame-resize frm (terminal-width) (terminal-height)))
            (define-values (d _ vb cs)
              (redisplay! db f fc caches cache-vb
                          #:frame-changed? #t
-                         #:bracket-colorer bkt
                          #:syntax-table racket-st))
-           (loop d f vb cs bkt fl)]
+           (loop d f vb cs fl)]
           [else
            (define-values (d f a?)
              (if (key-paste? ke)
@@ -121,10 +116,9 @@
              (redisplay! d f fc caches cache-vb
                          #:content-changed? a?
                          #:frame-changed? (and a? (not (eq? frm f)))
-                         #:bracket-colorer bkt
                          #:syntax-table racket-st
                          #:font-locker fl))
-           (loop db2 frm2 vb2 cs2 bkt fl)])))
+           (loop db2 frm2 vb2 cs2 fl)])))
     (λ ()
       (display format-cursor-show)
       (display format-reset)

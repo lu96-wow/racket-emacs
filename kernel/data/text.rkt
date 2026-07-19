@@ -10,7 +10,7 @@
 ;; IMPORTANT: text.rkt knows NOTHING about faces.  The gap buffer internally
 ;; maintains a faces array (colocated with bytes for O(1) access), but
 ;; text-insert! and text-delete! only deal with bytes.  Face management is
-;; a higher-layer concern (buffer.rkt, colorer, bracket-cache).
+;; a higher-layer concern (buffer.rkt, colorer).
 ;;
 ;; ============================================================================
 

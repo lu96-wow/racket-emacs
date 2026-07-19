@@ -5,12 +5,10 @@
 ;; ============================================================================
 ;; Leverages Racket's built-in lexer (syntax-color/racket-lexer) for full
 ;; syntax-aware tokenization.  Writes face-ids directly to the gap buffer's
-;; face array — same channel as bracket-colorer.
+;; face array.
 ;;
 ;; ============================================================================
-;; Ordering: bracket-colorer runs FIRST, font-lock runs SECOND.
-;; Font-lock overwrites bracket faces where it has its own data
-;; (e.g., a `(` inside a string gets string face, not bracket face).
+;; Ordering: bracket-colorer removed.
 ;;
 ;; ============================================================================
 ;; Design: simple re-scan (±15 lines around edit), no incremental state.
@@ -215,7 +213,7 @@
   (font-lock-scan-range! fl gb scan-start scan-end))
 
 ;; ============================================================
-;; extend-scan-range — shared with bracket-colorer
+;; extend-scan-range — font-lock scan range
 ;; (duplicated to avoid circular dependency)
 ;; ============================================================
 
