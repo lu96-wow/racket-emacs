@@ -63,6 +63,10 @@
   (or (guard-read-only db)
       (base-cmd-self-insert db ch)))
 
+(define (cmd-paste db str)
+  (or (guard-read-only db)
+      (base-cmd-self-insert-string db str)))
+
 (define (cmd-newline db)
   (or (guard-read-only db)
       (base-cmd-newline db)))
@@ -294,7 +298,7 @@
 
 (provide
  ;; ── content-modifying (guarded) ──
- cmd-self-insert cmd-newline cmd-tab
+ cmd-self-insert cmd-paste cmd-newline cmd-tab
  cmd-backward-delete cmd-forward-delete
  cmd-kill-line
  cmd-kill-region cmd-delete-region cmd-copy-region

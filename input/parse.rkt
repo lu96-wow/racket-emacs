@@ -225,6 +225,40 @@
     [else #f]))
 
 ;; ============================================================
+;; Bracketed paste — \e[200~ ... \e[201~
+;; ============================================================
+;;
+;; Reads pasted content byte-by-byte.  ESC within the content is
+;; checked against the terminator \e[201~ — if it matches, the
+;; paste ends; otherwise ESC is part of the content.
+
+(define paste-end-2 (bytes 50 48 49 126))  ;; 201~ (after CSI-OPEN)
+
+(define (read-paste)
+  (let loop ([acc (bytes)])
+    (define b (read-byte/timeout 2.0))
+    (cond
+      [(not b) (key-paste (normalize-paste acc))]
+      [(eq? b (quote resize)) (key-paste (normalize-paste acc))]
+      [(= b ESC)
+       (let ()
+         (define b2 (read-byte/timeout ESCDELAY))
+         (cond [(not b2) (loop (bytes-append acc (bytes ESC)))]
+               [(= b2 CSI-OPEN)
+                (let ()
+                  (define rest (read-bytes-n/timeout 4 ESCDELAY))
+                  (if (and (= (bytes-length rest) 4)
+                           (bytes=? rest paste-end-2))
+                      (key-paste (normalize-paste acc))
+                      (loop (bytes-append acc (bytes ESC b2) rest))))]
+               [else (loop (bytes-append acc (bytes ESC b2)))]))]
+      [else (loop (bytes-append acc (bytes b)))])))
+
+(define (normalize-paste bs)
+  ;; Strip ALL \r characters (Windows line endings, stray CR).
+  (regexp-replace* #rx"\r" (bytes->string/utf-8 bs) ""))
+
+;; ============================================================
 ;; read-key — main entry point
 ;; ============================================================
 ;;
@@ -301,6 +335,10 @@
           (or (= final MOUSE-EVENT) (= final MOUSE-RELEASE))
           (>= (length params) 3))
      (decode-sgr-mouse params final)]
+
+	    ;; Bracketed paste start: ESC [ 2 0 0 ~
+	    [(and (pair? params) (= (car params) 200) (= final 126))
+	     (read-paste)]
 
     ;; Regular CSI keyboard sequence
     [else

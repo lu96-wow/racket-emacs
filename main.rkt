@@ -75,6 +75,7 @@
       (screen-init!)
       (detect-terminal-size!)
       (format-alt-screen-enable)
+      (display format-bracketed-paste-enable)
       (display format-mouse-enable)
       (display format-clear-screen)
       (flush-output)
@@ -112,7 +113,10 @@
                          #:syntax-table racket-st))
            (loop d f vb cs bkt fl)]
           [else
-           (define-values (d f a?) (dispatch-key global-keymap db frm ke cmd-self-insert))
+           (define-values (d f a?)
+             (if (key-paste? ke)
+                 (values (cmd-paste db (key-paste-text ke)) frm #t)
+                 (dispatch-key global-keymap db frm ke cmd-self-insert)))
            (define-values (db2 frm2 vb2 cs2)
              (redisplay! d f fc caches cache-vb
                          #:content-changed? a?
@@ -124,6 +128,7 @@
     (λ ()
       (display format-cursor-show)
       (display format-reset)
+      (display format-bracketed-paste-disable)
       (format-alt-screen-disable)
       (screen-cleanup!)
       (exit 0))))

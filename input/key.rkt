@@ -15,6 +15,7 @@
  key-sym?  key-sym  key-sym-name
  key-mouse? key-mouse key-mouse-button key-mouse-x key-mouse-y
  key-mouse-action key-mouse-mods
+ key-paste? key-paste key-paste-text
 
  ;; ── classification ──
  key-self-insert?
@@ -44,6 +45,9 @@
 ;;          Convert to 0-based via (sub1 x) (sub1 y) for internal use.
 ;; action : symbol? — 'press 'release 'move 'scroll
 ;; mods   : exact-nonnegative-integer? — modifier bitmask
+
+(struct key-paste (text) #:transparent)
+;; text : string? — pasted content from bracketed-paste mode
 
 ;; ============================================================
 ;; Classification

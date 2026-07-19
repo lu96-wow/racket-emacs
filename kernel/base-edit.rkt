@@ -40,7 +40,7 @@
 
 (provide
  ;; ── content-modifying ──
- cmd-self-insert cmd-newline cmd-tab
+ cmd-self-insert cmd-self-insert-string cmd-newline cmd-tab
  cmd-backward-delete cmd-forward-delete
  cmd-kill-line
 
@@ -78,6 +78,14 @@
 (define (cmd-self-insert db ch)
   (if ch
       (dirty-insert! db (string ch) (dirty-point db))
+      db))
+
+(define (cmd-self-insert-string db str)
+  (if (and (string? str) (positive? (string-length str)))
+      (let* ([pt (dirty-point db)]
+             [db1 (dirty-insert! db str pt)]
+             [blen (bytes-length (string->bytes/utf-8 str))])
+        (dirty-set-point! db1 (+ pt blen)))
       db))
 
 (define (cmd-newline db)
