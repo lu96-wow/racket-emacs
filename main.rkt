@@ -11,7 +11,7 @@
          "kernel/dirty.rkt"
          "kernel/data/text.rkt"
          "kernel/data/syntax.rkt"
-         "kernel/font-lock.rkt"
+         "lang/font-lock.rkt"
          "edit.rkt"
          "input/key.rkt"
          "input/parse.rkt"
@@ -82,9 +82,12 @@
       (define db  (make-dirty-buffer buf))
       (init-face-cache!)
       (define fc (current-face-cache))
-      (font-lock-register-faces!)
+      ;; Register font-lock faces (display concern — colors)
+      (for ([spec (in-list font-lock-face-specs)])
+        (match-define (list name kvs ...) spec)
+        (define-face! name (apply make-face-attrs kvs)))
       (define racket-st (make-racket-syntax-table))
-      (define fl  (make-font-locker fc))
+      (define fl  (make-font-locker (λ (name) (face-id-for-name name fc))))
       ;; Initial full color scan
       (font-lock-scan-range! fl (text-gap (buffer-text buf)) 0 (buffer-length buf))
       (set-buffer-point! buf (buffer-length buf))

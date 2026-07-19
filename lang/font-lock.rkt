@@ -1,20 +1,39 @@
 #lang racket
 
-;; kernel/font-lock.rkt — Syntax highlighting via racket-lexer
+;; lang/font-lock.rkt — Syntax highlighting via racket-lexer
 ;;
 ;; ============================================================================
-;; Leverages Racket's built-in lexer (syntax-color/racket-lexer) for full
-;; syntax-aware tokenization.  Writes face-ids directly to the gap buffer's
-;; face array.
+;; Language-layer: pure data + function application.
+;; Depends on kernel (gap-buffer, face raw ops) but NOT on display.
+;;
+;; Face registration (colors) is a display concern — the caller resolves
+;; face-names → face-ids via the display layer and passes them in.
 ;;
 ;; ============================================================================
-;; Ordering: bracket-colorer removed.
-;;
+;; Architecture
 ;; ============================================================================
-;; Design: simple re-scan (±15 lines around edit), no incremental state.
-;; For terminal-sized files (a few thousand lines), a full re-scan of the
-;; visible region is fast enough.  Token trees and checkpoint convergence
-;; can be added later if profiling shows a bottleneck.
+;;
+;;   lang/font-lock.rkt        ← this file
+;;     → kernel/data/gap.rkt   (gap-length, gap-substring)
+;;     → kernel/data/query.rkt (gap-skip-n, gap-scan-byte)
+;;     → kernel/data/face.rkt  (face-fill!)
+;;     → syntax-color/racket-lexer
+;;
+;;   Does NOT import display/face.rkt.
+;;
+;;   Exports:
+;;     - face-name constants      (pure symbols)
+;;     - token→face-name mapping  (pure data)
+;;     - racket-keywords          (pure set)
+;;     - font-locker struct       (stores resolved face-ids)
+;;     - make-font-locker         (takes resolve: symbol→face-id)
+;;     - font-lock-scan-range!    (writes face-ids to gap buffer)
+;;     - font-lock-update!        (±15-line re-scan after edit)
+;;
+;;   Caller (main.rkt) wires:
+;;     1. Register faces with display/face using the exported face specs
+;;     2. Create font-locker with (make-font-locker face-id-for-name)
+;;     3. Call font-lock-scan-range! / font-lock-update!
 ;;
 ;; ============================================================================
 ;; Character → Byte mapping
@@ -26,45 +45,56 @@
 ;; using gap-skip-n with progressive tracking (small O(1) skips per token).
 ;;
 ;; ============================================================================
-;; Dependencies
-;; ============================================================================
-;;
-;;   syntax-color/racket-lexer  — Racket's built-in lexer
-;;   kernel/data/gap.rkt        — gap-length, gap-buffer-*
-;;   kernel/data/query.rkt      — gap-substring, gap-skip-n, gap-scan-byte
-;;   kernel/data/face.rkt       — face-fill!
-;;   display/face.rkt           — define-face!, face-id-for-name, make-face-attrs
-;;
-;; ============================================================================
 
 (require syntax-color/racket-lexer
-         "data/gap.rkt"
-         "data/query.rkt"
-         "data/face.rkt"
-         "../display/face.rkt")
+         "../kernel/data/gap.rkt"
+         "../kernel/data/query.rkt"
+         "../kernel/data/face.rkt")
 
 (provide
- ;; ── data ──
- font-locker? make-font-locker
- font-locker-keywords
+ ;; ── face-name data (caller uses these with display/face to register colors) ──
+ font-lock-face-name      ; token-type → face-name symbol
+ font-lock-keyword-face-name
 
- ;; ── face registration ──
- font-lock-register-faces!
+ ;; ── face spec data for registration ──
+ font-lock-face-specs     ; (listof (list/c symbol? key value ...))
+
+ ;; ── language data ──
+ racket-keywords           ; (setof string?)
+
+ ;; ── font-locker struct ──
+ font-locker? make-font-locker
+ font-locker-token->fid font-locker-keyword-fid font-locker-keywords
 
  ;; ── scanning ──
  font-lock-scan-range!
  font-lock-update!)
 
 ;; ============================================================
-;; Token type → face name mapping
+;; Face-name constants — pure symbols, no display dependency
 ;; ============================================================
 
-(define token->face-name
-  (hasheq 'comment             'font-lock-comment-face
-          'string              'font-lock-string-face
-          'constant            'font-lock-constant-face
-          'hash-colon-keyword  'font-lock-keyword-face
-          'keyword             'font-lock-keyword-face))
+(define font-lock-comment-face-name  'font-lock-comment-face)
+(define font-lock-string-face-name   'font-lock-string-face)
+(define font-lock-constant-face-name 'font-lock-constant-face)
+(define font-lock-keyword-face-name  'font-lock-keyword-face)
+
+(define font-lock-face-name
+  (hasheq 'comment             font-lock-comment-face-name
+          'string              font-lock-string-face-name
+          'constant            font-lock-constant-face-name
+          'hash-colon-keyword  font-lock-keyword-face-name
+          'keyword             font-lock-keyword-face-name))
+
+;; ============================================================
+;; Face specs — pure data for the display layer to register
+;; ============================================================
+
+(define font-lock-face-specs
+  `((,font-lock-comment-face-name  foreground (130 130 130)  slant italic)
+    (,font-lock-string-face-name   foreground (80  200 120))
+    (,font-lock-constant-face-name foreground (200 160 80))
+    (,font-lock-keyword-face-name  foreground (100 180 255)  weight bold)))
 
 ;; ============================================================
 ;; Racket keywords — symbols that get keyword face
@@ -104,9 +134,9 @@
 
 ;; font-locker — resolved face-ids ready for direct writing to gap buffer.
 ;;
-;;   token->fid   — hash: token-type-symbol → face-id (comment, string, constant)
+;;   token->fid   — hash: token-type-symbol → face-id
 ;;   keyword-fid  — face-id for recognized Racket keywords
-;;   keywords     — set of keyword strings (for symbol lookup)
+;;   keywords     — set of keyword strings
 
 (struct font-locker
   (token->fid
@@ -115,36 +145,20 @@
   #:transparent)
 
 ;; ============================================================
-;; Face registration
+;; Constructor — takes face-name→face-id resolver (from display layer)
 ;; ============================================================
 
-(define (font-lock-register-faces!)
-  (define-face! 'font-lock-comment-face
-                (make-face-attrs 'foreground (list 130 130 130)   ; grey
-                                 'slant 'italic))
-  (define-face! 'font-lock-string-face
-                (make-face-attrs 'foreground (list 80 200 120)))  ; green
-  (define-face! 'font-lock-constant-face
-                (make-face-attrs 'foreground (list 200 160 80)))  ; orange
-  (define-face! 'font-lock-keyword-face
-                (make-face-attrs 'foreground (list 100 180 255)   ; blue
-                                 'weight 'bold)))
-
-;; ============================================================
-;; Constructor — resolves face names to face-ids
-;; ============================================================
-
-(define (make-font-locker fc)
-  (unless fc
-    (raise-argument-error 'make-font-locker "face-cache?" fc))
+(define (make-font-locker resolve-fid)
+  (unless (procedure? resolve-fid)
+    (raise-argument-error 'make-font-locker "procedure?" resolve-fid))
   (define t->fid
-    (for/hash ([(type name) (in-hash token->face-name)])
-      (values type (face-id-for-name name fc))))
-  (define kw-fid (face-id-for-name 'font-lock-keyword-face fc))
+    (for/hash ([(type name) (in-hash font-lock-face-name)])
+      (values type (resolve-fid name))))
+  (define kw-fid (resolve-fid font-lock-keyword-face-name))
   (font-locker t->fid kw-fid racket-keywords))
 
 ;; ============================================================
-;; token→face-id resolution
+;; token→face-id resolution (pure data lookup)
 ;; ============================================================
 
 (define (token-face-id fl type lexeme)
@@ -213,8 +227,7 @@
   (font-lock-scan-range! fl gb scan-start scan-end))
 
 ;; ============================================================
-;; extend-scan-range — font-lock scan range
-;; (duplicated to avoid circular dependency)
+;; extend-scan-range — ±15 lines around edit
 ;; ============================================================
 
 (define (extend-scan-range gb edit-start edit-len)

@@ -18,7 +18,7 @@
          "kernel/buffer.rkt"
          "kernel/data/text.rkt"
          "kernel/data/marker.rkt"
-         "kernel/font-lock.rkt")
+         "lang/font-lock.rkt")
 
 (provide redisplay! redisplay-init! invalidate-leaf-caches!)
 
